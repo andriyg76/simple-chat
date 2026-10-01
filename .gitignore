@@ -1,0 +1,23 @@
+# Go
+**/bin/
+**/*.exe
+**/*.test
+
+# Java
+**/target/
+**/.classpath
+**/.project
+**/.settings/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.*

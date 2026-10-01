@@ -17,6 +17,8 @@ Products (Askoldova, games-buddy, …) implement the same protocol; language fol
 ```text
 simple-chat/
   protocol.md          # wire contract (start here)
-  go/client|server/
-  java/client|server/  # plain JDK / Go — no Spring Boot
+  go/client|server/    # games-buddy chathttp + chatclient (see go/README.md)
+  java/client|server/  # plain JDK — no Spring Boot
 ```
+
+Clone [games-buddy](https://github.com/andriyg76/games-buddy) next to this repo for Go `replace` paths.

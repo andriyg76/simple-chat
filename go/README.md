@@ -1,18 +1,21 @@
 # Go reference stack
 
-Vendored from [games-buddy](https://github.com/andriyg76/games-buddy) `internal/chat*` (same `/chat/v1` wire format; see [protocol.md](../protocol.md)).
+Core only: **delivery journal**, **SSE**, **long poll**, **HTTP** — no database or message persistence (products add that separately).
 
-| Path | Role |
-|------|------|
-| [pkg/chatcore](pkg/chatcore) | Cursor journal + delivery |
-| [pkg/chatclient](pkg/chatclient) | HTTP + SSE / long-poll client |
-| [pkg/chat](pkg/chat) | Profiles, sessions, Mongo conversations |
-| [pkg/chathttp](pkg/chathttp) | HTTP routes (plain chat; no AI/WhatsApp) |
-| [pkg/msgstore](pkg/msgstore) | Message persistence |
-| [server](server) | `main` — Mongo + `/chat/v1` |
-| [client](client) | Terminal client using `chatclient` |
+| Package | Role |
+|---------|------|
+| [pkg/chatcore](pkg/chatcore) | Cursor journal + `Store` access contract |
+| [pkg/chatclient](pkg/chatclient) | Embeddable HTTP + SSE / long-poll client |
+| [pkg/chatterm](pkg/chatterm) | Embeddable terminal client (used by `go/client`) |
+| [pkg/chathttp](pkg/chathttp) | `/chat/v1` transport |
+| [pkg/session](pkg/session) | In-memory `chatcore.Store` for demos/tests |
+| [test-server](test-server) | Harness (`PORT` via ephemeral listen; like Java test-server) |
+| [server](server) | Fixed-port server (`PORT`, default 8080) |
+| [e2e](../e2e) | Cross-language E2E tests |
+| [pkg/testserver](pkg/testserver) | In-process harness for tests |
+| [client](client) | `simple-chat` terminal binary (thin wrapper over `chatterm`) |
 
-Sync changes from games-buddy by copying updated files into `pkg/` and fixing imports to `github.com/agushuley/simple-chat/go/pkg/...`.
+See [SYNC.md](../SYNC.md) for copying sources into products.
 
 ## Build
 
@@ -24,25 +27,16 @@ go build -o bin/simple-chat-client ./client
 
 ## Run
 
-Server (MongoDB required):
-
 ```bash
-set MONGO_URI=mongodb://127.0.0.1:27017
-set ADMIN_TOKEN=dev-admin-token
+set CHAT_TOKEN=dev
+set CHAT_ENROLL_CODE=dev
 bin\simple-chat-server.exe
 ```
 
-Bootstrap once:
+Client (profiles, Markdown; default send is async — replies on SSE/long poll; use `--plain` for `/messages/plain` only):
 
 ```bash
-curl -s -X POST http://localhost:8080/admin/chat/bootstrap ^
-  -H "Authorization: Bearer dev-admin-token" ^
-  -H "Content-Type: application/json" ^
-  -d "{\"displayName\":\"Admin\"}"
+bin\simple-chat-client.exe --profile local --server http://localhost:8080 --enroll dev
 ```
 
-Client:
-
-```bash
-bin\simple-chat-client.exe --server http://localhost:8080 --enroll <code>
-```
+Or `--token dev` with `--server` after enrolling once. Config: `%AppData%\simple-chat\chat.json` on Windows.

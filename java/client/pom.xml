@@ -4,19 +4,37 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.simplechat</groupId>
-    <artifactId>simple-chat-java-client</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
-    <name>simple-chat-java-client</name>
-    <description>Reference Java client for simple-chat protocol</description>
+    <parent>
+        <groupId>io.github.andriyg76.simple-chat</groupId>
+        <artifactId>parent</artifactId>
+        <version>0.1.0</version>
+    </parent>
+
+    <artifactId>client</artifactId>
+    <name>client</name>
+    <description>Reference Java client stub (not published)</description>
 
     <properties>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.compiler.release>21</maven.compiler.release>
+        <maven.deploy.skip>true</maven.deploy.skip>
     </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>io.github.andriyg76.simple-chat</groupId>
+            <artifactId>protocol</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+    </dependencies>
 
     <build>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-deploy-plugin</artifactId>
+                <configuration>
+                    <skip>true</skip>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
@@ -24,7 +42,7 @@
                 <configuration>
                     <archive>
                         <manifest>
-                            <mainClass>com.simplechat.client.SimpleChatClient</mainClass>
+                            <mainClass>io.github.andriyg76.client.SimpleChatClient</mainClass>
                         </manifest>
                     </archive>
                 </configuration>

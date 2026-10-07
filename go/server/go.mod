@@ -1,8 +1,8 @@
-module github.com/agushuley/simple-chat/go/server
+module github.com/andriyg76/simple-chat/go/server
 
 go 1.25.0
 
-require github.com/agushuley/simple-chat/go/pkg v0.0.0
+require github.com/andriyg76/simple-chat/go/pkg v0.0.0
 
 require (
 	github.com/golang/snappy v0.0.4 // indirect
@@ -19,4 +19,4 @@ require (
 	golang.org/x/text v0.17.0 // indirect
 )
 
-replace github.com/agushuley/simple-chat/go/pkg => ../pkg
+replace github.com/andriyg76/simple-chat/go/pkg => ../pkg

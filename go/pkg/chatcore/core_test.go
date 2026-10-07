@@ -12,7 +12,6 @@ import (
 type memoryStore struct {
 	mu       sync.Mutex
 	sessions map[string]Session
-	saved    []Event
 }
 
 func (s *memoryStore) List(_ context.Context, p string, _ bool) ([]Session, error) {
@@ -46,20 +45,6 @@ func (s *memoryStore) Get(_ context.Context, p, id string) (Session, error) {
 	}
 	return v, nil
 }
-func (s *memoryStore) Touch(_ context.Context, p, id string) error {
-	_, err := s.Get(context.Background(), p, id)
-	return err
-}
-func (s *memoryStore) Save(_ context.Context, p, id, sender, text string) error {
-	if err := s.Touch(context.Background(), p, id); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.saved = append(s.saved, Event{Sender: sender, Text: text})
-	return nil
-}
-
 func TestGenericSessionsAndDelivery(t *testing.T) {
 	ctx := context.Background()
 	store := &memoryStore{sessions: map[string]Session{}}
@@ -85,9 +70,6 @@ func TestGenericSessionsAndDelivery(t *testing.T) {
 	}
 	if first.Cursor != 1 || second.Cursor != 2 || first.MessageID == second.MessageID {
 		t.Fatalf("events = %+v %+v", first, second)
-	}
-	if len(store.saved) != 2 || store.saved[1].Sender != "server" {
-		t.Fatalf("stored = %+v", store.saved)
 	}
 	got, found, err := core.Next(ctx, "owner", session.ID, 1, 0)
 	if err != nil || !found || got.Text != "hi" {

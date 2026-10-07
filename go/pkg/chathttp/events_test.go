@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agushuley/simple-chat/go/pkg/chatcore"
+	"github.com/andriyg76/simple-chat/go/pkg/chatcore"
 )
 
 type eventStore struct{}
@@ -24,22 +24,26 @@ func (eventStore) Get(_ context.Context, participant, id string) (chatcore.Sessi
 	}
 	return chatcore.Session{ID: id}, nil
 }
-func (eventStore) Touch(context.Context, string, string) error                { return nil }
-func (eventStore) Save(context.Context, string, string, string, string) error { return nil }
 
-func TestSSEReplayHeartbeatAndDisconnect(t *testing.T) {
-	h := &Handler{core: chatcore.New(eventStore{})}
-	h.core.Emit("one", chatcore.Event{Kind: "message", Sender: "server", Text: "hello"})
+func testHandler() *Handler {
+	return New(eventStore{}, Config{BearerToken: "secret", ParticipantID: "owner"})
+}
+
+func TestInboxSSEReplayHeartbeatAndDisconnect(t *testing.T) {
+	h := testHandler()
+	ctx := context.Background()
+	if _, err := h.core.Publish(ctx, "owner", "one", "server", "hello", ""); err != nil {
+		t.Fatal(err)
+	}
 	previous := heartbeatInterval
 	heartbeatInterval = 10 * time.Millisecond
 	defer func() { heartbeatInterval = previous }()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.SetPathValue("code", "one")
-		h.streamEvents(w, r, "owner")
+		h.streamInbox(w, r, "owner")
 	}))
 	defer server.Close()
-	ctx, cancel := context.WithCancel(context.Background())
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+	reqCtx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(reqCtx, http.MethodGet, server.URL, nil)
 	req.Header.Set("Last-Event-ID", "0")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -65,35 +69,36 @@ func TestSSEReplayHeartbeatAndDisconnect(t *testing.T) {
 	resp.Body.Close()
 }
 
-func TestSSERejectsExpiredCursorBeforeHeaders(t *testing.T) {
-	h := &Handler{core: chatcore.New(eventStore{})}
+func TestInboxSSERejectsExpiredCursorBeforeHeaders(t *testing.T) {
+	h := testHandler()
+	ctx := context.Background()
 	for range 101 {
-		h.core.Emit("one", chatcore.Event{Kind: "message", Text: "x"})
+		if _, err := h.core.Publish(ctx, "owner", "one", "server", "x", ""); err != nil {
+			t.Fatal(err)
+		}
 	}
-	req := httptest.NewRequest(http.MethodGet, "/events", nil)
-	req.SetPathValue("code", "one")
+	req := httptest.NewRequest(http.MethodGet, "/inbox/events", nil)
 	req.Header.Set("Last-Event-ID", "0")
 	w := httptest.NewRecorder()
-	h.streamEvents(w, req, "owner")
-	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "cursor_expired") {
+	h.streamInbox(w, req, "owner")
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "inbox_cursor_expired") {
 		t.Fatalf("response = %d %s", w.Code, w.Body.String())
 	}
-	req = httptest.NewRequest(http.MethodGet, "/events", nil)
-	req.SetPathValue("code", "one")
+	req = httptest.NewRequest(http.MethodGet, "/inbox/events", nil)
 	req.Header.Set("Last-Event-ID", "1")
-	ctx, cancel := context.WithCancel(req.Context())
+	reqCtx, cancel := context.WithCancel(req.Context())
 	cancel()
-	req = req.WithContext(ctx)
+	req = req.WithContext(reqCtx)
 	w = httptest.NewRecorder()
-	h.streamEvents(w, req, "owner")
+	h.streamInbox(w, req, "owner")
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "id: 2\n") {
 		t.Fatalf("boundary = %d %s", w.Code, w.Body.String())
 	}
 }
 
-func TestSSERequiresBearerBeforeOpeningStream(t *testing.T) {
-	h := &Handler{core: chatcore.New(eventStore{})}
-	req := httptest.NewRequest(http.MethodGet, "/chat/v1/conversations/one/events", nil)
+func TestInboxSSERequiresBearerBeforeOpeningStream(t *testing.T) {
+	h := testHandler()
+	req := httptest.NewRequest(http.MethodGet, "/chat/v1/inbox/events", nil)
 	w := httptest.NewRecorder()
 	h.Routes().ServeHTTP(w, req)
 	if w.Code != http.StatusUnauthorized || !strings.Contains(w.Body.String(), "unauthorized") {

@@ -16,7 +16,8 @@ var (
 	ErrNotFound        = errors.New("chat session not found")
 	ErrMessageRequired = errors.New("message is required")
 	ErrCursorExpired   = errors.New("cursor_expired")
-	ErrInvalidCursor   = errors.New("invalid cursor")
+	ErrInvalidCursor        = errors.New("invalid cursor")
+	ErrInboxCursorExpired   = errors.New("inbox_cursor_expired")
 )
 
 // Session is a chat conversation, not a bearer authentication session.
@@ -28,12 +29,11 @@ type Session struct {
 }
 
 // Store applies participant access checks to every operation.
+// Persistence (messages, profiles) belongs in the product layer, not chatcore.
 type Store interface {
 	List(context.Context, string, bool) ([]Session, error)
 	Create(context.Context, string) (Session, error)
 	Get(context.Context, string, string) (Session, error)
-	Touch(context.Context, string, string) error
-	Save(context.Context, string, string, string, string) error
 }
 
 type Event struct {
@@ -48,9 +48,12 @@ type Event struct {
 }
 
 type Core struct {
-	store Store
-	mu    sync.Mutex
-	feeds map[string]*journal
+	store    Store
+	members  MembersStore
+	metadata MetadataStore
+	mu         sync.Mutex
+	feeds      map[string]*journal
+	inboxFeeds map[string]*inboxJournal
 }
 
 type journal struct {
@@ -60,7 +63,20 @@ type journal struct {
 	wake   chan struct{}
 }
 
-func New(store Store) *Core { return &Core{store: store, feeds: make(map[string]*journal)} }
+func New(store Store) *Core {
+	return &Core{store: store, feeds: make(map[string]*journal), inboxFeeds: make(map[string]*inboxJournal)}
+}
+
+// WithMembers attaches optional multi-user membership storage (same product adapter may implement Store and MembersStore).
+func (c *Core) WithMembers(members MembersStore) *Core {
+	c.members = members
+	return c
+}
+
+func (c *Core) WithMetadata(metadata MetadataStore) *Core {
+	c.metadata = metadata
+	return c
+}
 
 func (c *Core) List(ctx context.Context, participant string, archived bool) ([]Session, error) {
 	return c.store.List(ctx, participant, archived)
@@ -102,13 +118,9 @@ func (c *Core) Publish(ctx context.Context, participant, id, sender, text, reque
 	if _, err := c.Session(ctx, participant, id); err != nil {
 		return Event{}, err
 	}
-	if err := c.store.Save(ctx, participant, id, sender, text); err != nil {
-		return Event{}, err
-	}
-	if err := c.store.Touch(ctx, participant, id); err != nil {
-		return Event{}, err
-	}
-	return c.Emit(id, Event{MessageID: uuid.NewString(), RequestID: requestID, Sender: sender, Kind: "message", Text: text}), nil
+	event := c.Emit(id, Event{MessageID: uuid.NewString(), RequestID: requestID, Sender: sender, Kind: "message", Text: text})
+	c.fanOutToInbox(ctx, participant, id, event)
+	return event, nil
 }
 
 // Emit publishes an integration event after the integration has checked access.

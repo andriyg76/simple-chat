@@ -4,30 +4,81 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/agushuley/simple-chat/go/pkg/chat"
-	"github.com/agushuley/simple-chat/go/pkg/chatcore"
-	"github.com/agushuley/simple-chat/go/pkg/msgstore"
+	"github.com/andriyg76/simple-chat/go/pkg/chatcore"
+	"github.com/google/uuid"
 )
 
+// Config wires transport auth for a reference server. Products replace this with real identity + storage.
+type Config struct {
+	BearerToken         string
+	EnrollCode          string
+	ParticipantID       string
+	IdentityFromContext bool
+	PublicBaseURL       string
+	AdminToken          string
+	DeviceStore         DeviceStore
+	PushNotifier        PushNotifier
+}
+
 type Handler struct {
-	chat  *chat.Service
-	store *msgstore.Store
-	core  *chatcore.Core
+	core                *chatcore.Core
+	bearerToken         string
+	enrollCode          string
+	participantID       string
+	identityFromContext bool
+	publicBaseURL       string
+	adminToken          string
+	tokens              *TokenStore
+	challenges          *ChallengeStore
+	devices             DeviceStore
+	inboxPresence       *InboxPresence
+	pushNotifier        PushNotifier
 }
 
 var heartbeatInterval = 15 * time.Second
 
-func New(chatService *chat.Service, store *msgstore.Store) *Handler {
+func New(store chatcore.Store, cfg Config) *Handler {
+	participant := cfg.ParticipantID
+	if participant == "" {
+		participant = "default"
+	}
+	core := chatcore.New(store)
+	if members, ok := store.(chatcore.MembersStore); ok {
+		core.WithMembers(members)
+	}
+	if metadata, ok := store.(chatcore.MetadataStore); ok {
+		core.WithMetadata(metadata)
+	}
+	tokens := NewTokenStore(30*24*time.Hour, 2*time.Minute)
+	if cfg.BearerToken != "" {
+		tokens.InstallDevToken(cfg.BearerToken, participant, participant)
+	}
+	devices := cfg.DeviceStore
+	if devices == nil {
+		devices = NewMemoryDeviceStore()
+	}
+	push := cfg.PushNotifier
+	if push == nil {
+		push = &LoggingPushNotifier{}
+	}
 	return &Handler{
-		chat:  chatService,
-		store: store,
-		core:  chatcore.New(coreStore{chatService, store}),
+		core:                core,
+		bearerToken:         cfg.BearerToken,
+		enrollCode:          cfg.EnrollCode,
+		participantID:       participant,
+		identityFromContext: cfg.IdentityFromContext,
+		publicBaseURL:       cfg.PublicBaseURL,
+		adminToken:          cfg.AdminToken,
+		tokens:              tokens,
+		challenges:          NewChallengeStore(10 * time.Minute),
+		devices:             devices,
+		inboxPresence:       NewInboxPresence(),
+		pushNotifier:        push,
 	}
 }
 
@@ -35,35 +86,22 @@ func (h *Handler) Core() *chatcore.Core { return h.core }
 
 func (h *Handler) Routes() http.Handler {
 	r := http.NewServeMux()
-	r.HandleFunc("POST /chat/v1/enrollments/exchange", h.exchangeEnrollment)
+	h.registerEnrollmentRoutes(r)
 	r.HandleFunc("GET /chat/v1/conversations", h.listConversations)
 	r.HandleFunc("POST /chat/v1/conversations", h.createConversation)
+	r.HandleFunc("POST /chat/v1/conversations/{code}/messages/async", h.asyncMessage)
 	r.HandleFunc("POST /chat/v1/conversations/{code}/messages/plain", h.plainMessage)
-	r.HandleFunc("GET /chat/v1/conversations/{code}/feed", h.pollFeed)
-	r.HandleFunc("GET /chat/v1/conversations/{code}/events", h.events)
-	r.HandleFunc("GET /chat/v1/conversations/{code}/cursor", h.currentCursor)
+	r.HandleFunc("GET /chat/v1/inbox/cursor", h.inboxCursor)
+	r.HandleFunc("GET /chat/v1/inbox/feed", h.inboxFeed)
+	r.HandleFunc("GET /chat/v1/inbox/events", h.inboxEvents)
+	r.HandleFunc("PATCH /chat/v1/conversations/{code}", h.updateConversation)
+	r.HandleFunc("GET /chat/v1/conversations/{code}/members", h.listMembers)
+	r.HandleFunc("POST /chat/v1/conversations/{code}/members", h.addMember)
+	r.HandleFunc("DELETE /chat/v1/conversations/{code}/members/{profileId}", h.removeMember)
+	r.HandleFunc("PUT /chat/v1/devices/{deviceId}", h.putDevice)
+	r.HandleFunc("DELETE /chat/v1/devices/{deviceId}", h.deleteDevice)
+	r.HandleFunc("POST /chat/v1/devices/{deviceId}/heartbeat", h.heartbeatDevice)
 	return r
-}
-
-func (h *Handler) pollFeed(w http.ResponseWriter, r *http.Request) {
-	p, ok := h.authenticate(w, r)
-	if !ok {
-		return
-	}
-	cursor, err := parseCursor(r.URL.Query().Get("cursor"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_cursor", err.Error())
-		return
-	}
-	event, found, err := h.core.Next(r.Context(), p.ID.Hex(), r.PathValue("code"), cursor, 30*time.Second)
-	if h.deliveryError(w, err) {
-		return
-	}
-	if !found {
-		writeJSON(w, http.StatusOK, map[string]any{"cursor": event.Cursor})
-		return
-	}
-	writeJSON(w, http.StatusOK, event)
 }
 
 func parseCursor(value string) (int64, error) {
@@ -75,18 +113,6 @@ func parseCursor(value string) (int64, error) {
 		return 0, chatcore.ErrInvalidCursor
 	}
 	return n, nil
-}
-
-func (h *Handler) currentCursor(w http.ResponseWriter, r *http.Request) {
-	p, ok := h.authenticate(w, r)
-	if !ok {
-		return
-	}
-	cursor, err := h.core.Cursor(r.Context(), p.ID.Hex(), r.PathValue("code"))
-	if h.deliveryError(w, err) {
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]int64{"cursor": cursor})
 }
 
 func (h *Handler) deliveryError(w http.ResponseWriter, err error) bool {
@@ -108,103 +134,6 @@ func (h *Handler) deliveryError(w http.ResponseWriter, err error) bool {
 	return true
 }
 
-func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
-	p, ok := h.authenticate(w, r)
-	if !ok {
-		return
-	}
-	h.streamEvents(w, r, p.ID.Hex())
-}
-
-func (h *Handler) streamEvents(w http.ResponseWriter, r *http.Request, participant string) {
-	cursor, err := parseCursor(r.Header.Get("Last-Event-ID"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_cursor", err.Error())
-		return
-	}
-	if r.Header.Get("Last-Event-ID") == "" {
-		cursor, err = parseCursor(r.URL.Query().Get("cursor"))
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_cursor", err.Error())
-			return
-		}
-	}
-	code := r.PathValue("code")
-	event, found, err := h.core.Next(r.Context(), participant, code, cursor, 0)
-	if h.deliveryError(w, err) {
-		return
-	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, "stream_unsupported", "streaming is unavailable")
-		return
-	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	flusher.Flush()
-	for {
-		if !found {
-			event, found, err = h.core.Next(r.Context(), participant, code, cursor, heartbeatInterval)
-			if err != nil {
-				if errors.Is(err, context.Canceled) {
-					return
-				}
-				if errors.Is(err, chatcore.ErrCursorExpired) {
-					fmt.Fprint(w, "event: error\ndata: {\"error\":\"cursor_expired\"}\n\n")
-					flusher.Flush()
-				}
-				return
-			}
-			if !found {
-				if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
-					return
-				}
-				flusher.Flush()
-				continue
-			}
-		}
-		if event.Kind == "reply" && event.Text != "" {
-			cursor, found = event.Cursor, false
-			continue
-		}
-		data, err := json.Marshal(event)
-		if err != nil {
-			return
-		}
-		if _, err := fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", event.Cursor, event.Kind, data); err != nil {
-			return
-		}
-		flusher.Flush()
-		cursor, found = event.Cursor, false
-	}
-}
-
-func (h *Handler) Bootstrap(w http.ResponseWriter, r *http.Request) {
-	var request struct {
-		DisplayName string `json:"displayName"`
-	}
-	if !decode(w, r, &request) {
-		return
-	}
-	profile, code, err := h.chat.Bootstrap(r.Context(), request.DisplayName)
-	if err != nil {
-		writeError(w, http.StatusConflict, "bootstrap_failed", err.Error())
-		return
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{"profile": profile, "enrollmentCode": code})
-}
-
-func (h *Handler) ResetBootstrap(w http.ResponseWriter, r *http.Request) {
-	removed, err := h.chat.ResetBootstrapState(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "reset_failed", err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"removedProfiles": removed})
-}
-
 func (h *Handler) exchangeEnrollment(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		Code string `json:"code"`
@@ -212,21 +141,29 @@ func (h *Handler) exchangeEnrollment(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &request) {
 		return
 	}
-	profile, token, err := h.chat.ExchangeEnrollment(r.Context(), request.Code)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "invalid_enrollment", err.Error())
+	if request.Code != h.enrollCode {
+		writeError(w, http.StatusUnauthorized, "invalid_enrollment", "invalid enrollment code")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"token": token, "expiresInSeconds": 30 * 24 * 60 * 60, "profile": profile})
+	token, expiresIn := h.tokens.Issue(h.participantID, h.participantID, "user")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"token":            token,
+		"expiresInSeconds": expiresIn,
+		"profile": map[string]any{
+			"code":        h.participantID,
+			"displayName": h.participantID,
+			"role":        "user",
+		},
+	})
 }
 
 func (h *Handler) listConversations(w http.ResponseWriter, r *http.Request) {
-	p, ok := h.authenticate(w, r)
+	participant, ok := h.authenticate(w, r)
 	if !ok {
 		return
 	}
 	archived := r.URL.Query().Get("archived") == "true"
-	items, err := h.core.List(r.Context(), p.ID.Hex(), archived)
+	items, err := h.core.List(r.Context(), participant, archived)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "list_conversations", err.Error())
 		return
@@ -235,20 +172,131 @@ func (h *Handler) listConversations(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) createConversation(w http.ResponseWriter, r *http.Request) {
-	p, ok := h.authenticate(w, r)
+	participant, ok := h.authenticate(w, r)
 	if !ok {
 		return
 	}
-	c, err := h.core.Create(r.Context(), p.ID.Hex())
+	var request struct {
+		Title string `json:"title"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&request)
+	c, err := h.core.Create(r.Context(), participant)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "create_conversation", err.Error())
 		return
 	}
+	if strings.TrimSpace(request.Title) != "" {
+		c, err = h.core.UpdateTitle(r.Context(), participant, c.ID, request.Title)
+		if h.metadataError(w, err) {
+			return
+		}
+	}
 	writeJSON(w, http.StatusCreated, c)
 }
 
-func (h *Handler) plainMessage(w http.ResponseWriter, r *http.Request) {
-	p, ok := h.authenticate(w, r)
+func (h *Handler) updateConversation(w http.ResponseWriter, r *http.Request) {
+	participant, ok := h.authenticate(w, r)
+	if !ok {
+		return
+	}
+	var request struct {
+		Title string `json:"title"`
+	}
+	if !decode(w, r, &request) {
+		return
+	}
+	session, err := h.core.UpdateTitle(r.Context(), participant, r.PathValue("code"), request.Title)
+	if h.metadataError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, session)
+}
+
+func (h *Handler) listMembers(w http.ResponseWriter, r *http.Request) {
+	participant, ok := h.authenticate(w, r)
+	if !ok {
+		return
+	}
+	members, err := h.core.ListMembers(r.Context(), participant, r.PathValue("code"))
+	if h.memberError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"members": members})
+}
+
+func (h *Handler) addMember(w http.ResponseWriter, r *http.Request) {
+	participant, ok := h.authenticate(w, r)
+	if !ok {
+		return
+	}
+	var request struct {
+		ProfileID string `json:"profileId"`
+	}
+	if !decode(w, r, &request) {
+		return
+	}
+	if strings.TrimSpace(request.ProfileID) == "" {
+		writeError(w, http.StatusUnprocessableEntity, "profile_id_required", "profileId is required")
+		return
+	}
+	profileID := strings.TrimSpace(request.ProfileID)
+	if err := h.core.AddMember(r.Context(), participant, r.PathValue("code"), profileID); h.memberError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"profileId": profileID})
+}
+
+func (h *Handler) removeMember(w http.ResponseWriter, r *http.Request) {
+	participant, ok := h.authenticate(w, r)
+	if !ok {
+		return
+	}
+	if err := h.core.RemoveMember(r.Context(), participant, r.PathValue("code"), r.PathValue("profileId")); h.memberError(w, err) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) memberError(w http.ResponseWriter, err error) bool {
+	if err == nil {
+		return false
+	}
+	switch {
+	case errors.Is(err, chatcore.ErrMembersNotSupported):
+		writeError(w, http.StatusNotImplemented, "members_not_supported", err.Error())
+	case errors.Is(err, chatcore.ErrMemberNotFound):
+		writeError(w, http.StatusNotFound, "member_not_found", err.Error())
+	case errors.Is(err, chatcore.ErrMemberExists):
+		writeError(w, http.StatusConflict, "member_already_present", err.Error())
+	case errors.Is(err, chatcore.ErrLastMember):
+		writeError(w, http.StatusConflict, "last_member", "cannot remove the last member")
+	case errors.Is(err, chatcore.ErrNotFound):
+		writeError(w, http.StatusNotFound, "conversation_not_found", err.Error())
+	default:
+		writeError(w, http.StatusInternalServerError, "members", err.Error())
+	}
+	return true
+}
+
+func (h *Handler) metadataError(w http.ResponseWriter, err error) bool {
+	if err == nil {
+		return false
+	}
+	switch {
+	case errors.Is(err, chatcore.ErrMetadataNotSupported):
+		writeError(w, http.StatusNotImplemented, "metadata_not_supported", err.Error())
+	case errors.Is(err, chatcore.ErrTitleRequired):
+		writeError(w, http.StatusUnprocessableEntity, "title_required", "title is required")
+	case errors.Is(err, chatcore.ErrNotFound):
+		writeError(w, http.StatusNotFound, "conversation_not_found", err.Error())
+	default:
+		writeError(w, http.StatusInternalServerError, "conversation_metadata", err.Error())
+	}
+	return true
+}
+
+func (h *Handler) asyncMessage(w http.ResponseWriter, r *http.Request) {
+	participant, ok := h.authenticate(w, r)
 	if !ok {
 		return
 	}
@@ -262,25 +310,72 @@ func (h *Handler) plainMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, "message_required", "message is required")
 		return
 	}
-	event, err := h.core.Publish(r.Context(), p.ID.Hex(), r.PathValue("code"), "client", request.Message, "")
+	code := r.PathValue("code")
+	baseline, err := h.core.Cursor(r.Context(), participant, code)
 	if h.deliveryError(w, err) {
 		return
 	}
+	requestID := uuid.NewString()
+	event, err := h.core.Publish(r.Context(), participant, code, "client", request.Message, requestID)
+	if h.deliveryError(w, err) {
+		return
+	}
+	h.scheduleMessagePush(r.Context(), participant, code, event)
+	writeJSON(w, http.StatusAccepted, map[string]any{"messageId": requestID, "cursor": baseline})
+}
+
+func (h *Handler) plainMessage(w http.ResponseWriter, r *http.Request) {
+	participant, ok := h.authenticate(w, r)
+	if !ok {
+		return
+	}
+	var request struct {
+		Message string `json:"message"`
+	}
+	if !decode(w, r, &request) {
+		return
+	}
+	if strings.TrimSpace(request.Message) == "" {
+		writeError(w, http.StatusUnprocessableEntity, "message_required", "message is required")
+		return
+	}
+	code := r.PathValue("code")
+	event, err := h.core.Publish(r.Context(), participant, code, "client", request.Message, "")
+	if h.deliveryError(w, err) {
+		return
+	}
+	h.scheduleMessagePush(r.Context(), participant, code, event)
 	writeJSON(w, http.StatusCreated, event)
 }
 
-func (h *Handler) authenticate(w http.ResponseWriter, r *http.Request) (*chat.Profile, bool) {
+func (h *Handler) authenticate(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if h.identityFromContext {
+		id := participantFromContext(r.Context())
+		if id == "" {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "chat participant missing from context")
+			return "", false
+		}
+		return id, true
+	}
+	if id := participantFromContext(r.Context()); id != "" {
+		return id, true
+	}
 	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 	if token == "" {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "bearer token is required")
-		return nil, false
+		return "", false
 	}
-	p, err := h.chat.Authenticate(r.Context(), token)
-	if err != nil {
+	if h.tokens != nil {
+		profile, ok := h.tokens.Resolve(token)
+		if ok {
+			return profile.Code, true
+		}
+	}
+	if h.bearerToken != "" && token != h.bearerToken {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid or expired bearer token")
-		return nil, false
+		return "", false
 	}
-	return p, true
+	return h.participantID, true
 }
 
 func decode(w http.ResponseWriter, r *http.Request, dst any) bool {

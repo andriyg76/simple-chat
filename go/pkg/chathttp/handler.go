@@ -87,6 +87,7 @@ func (h *Handler) Core() *chatcore.Core { return h.core }
 func (h *Handler) Routes() http.Handler {
 	r := http.NewServeMux()
 	h.registerEnrollmentRoutes(r)
+	r.HandleFunc("GET /chat/v1/profile", h.getProfile)
 	r.HandleFunc("GET /chat/v1/conversations", h.listConversations)
 	r.HandleFunc("POST /chat/v1/conversations", h.createConversation)
 	r.HandleFunc("POST /chat/v1/conversations/{code}/messages/async", h.asyncMessage)

@@ -3,7 +3,6 @@ package e2e
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -70,6 +69,7 @@ func TestTokenRotation_GoServer(t *testing.T) {
 			return nil
 		})
 	}()
+	time.Sleep(50 * time.Millisecond)
 	rotateReq, _ := http.NewRequest(http.MethodPost, inst.BaseURL+"/admin/chat/rotate-token", bytes.NewBufferString(`{"profileId":"default"}`))
 	rotateReq.Header.Set("Authorization", "Bearer admin")
 	rotateReq.Header.Set("Content-Type", "application/json")
@@ -78,6 +78,9 @@ func TestTokenRotation_GoServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("rotate %d", resp.StatusCode)
+	}
 	select {
 	case <-done:
 	case <-ctx.Done():

@@ -1,6 +1,8 @@
 package io.github.andriyg76.client;
 
 import io.github.andriyg76.protocol.ConversationSession;
+import io.github.andriyg76.protocol.Profile;
+import io.github.andriyg76.protocol.ProfileRole;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -21,6 +23,24 @@ public final class ChatHttpClient {
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
         this.token = token;
         this.http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+    }
+
+    public Profile currentProfile() throws IOException, InterruptedException {
+        HttpResponse<String> resp = http.send(
+                request(baseUrl + "/chat/v1/profile", "GET", null),
+                HttpResponse.BodyHandlers.ofString());
+        expect(resp, 200);
+        String body = resp.body();
+        int profileKey = body.indexOf("\"profile\":");
+        String slice = profileKey >= 0 ? body.substring(profileKey) : body;
+        String role = Json.field(slice, "role");
+        ProfileRole profileRole = "admin".equals(role) ? ProfileRole.ADMIN : ProfileRole.USER;
+        return new Profile(
+                Json.field(slice, "code"),
+                Json.field(slice, "displayName"),
+                profileRole,
+                null,
+                null);
     }
 
     public void health() throws IOException, InterruptedException {

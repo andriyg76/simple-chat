@@ -119,6 +119,16 @@ When verification happens entirely outside HTTP (e.g. operator pastes secret in 
 | `role` | `user` \| `admin` |
 | `createdAt`, `updatedAt` | RFC3339 |
 
+`code` is the stable **profile id** used as `profileId` in members APIs.
+
+### Current profile (authenticated)
+
+| Method | Path | Auth | Response |
+|--------|------|------|----------|
+| `GET` | `/chat/v1/profile` | bearer or embedded | **200** `{"profile":{…}}` (same fields as enrollment; `createdAt` / `updatedAt` optional) |
+
+Use after login when the client did not persist enrollment JSON, or to refresh `displayName` from the host. Embedded hosts resolve identity from request context the same way as other `/chat/v1` routes.
+
 ---
 
 ## Conversations

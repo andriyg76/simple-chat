@@ -17,6 +17,8 @@ import io.github.andriyg76.protocol.SendMessageRequest;
 import io.github.andriyg76.protocol.DeviceHeartbeatRequest;
 import io.github.andriyg76.protocol.DevicePutRequest;
 import io.github.andriyg76.protocol.DeviceRecord;
+import io.github.andriyg76.protocol.Profile;
+import io.github.andriyg76.protocol.ProfileResponse;
 import io.github.andriyg76.protocol.UpdateConversationRequest;
 import java.time.Duration;
 import java.util.Objects;
@@ -110,6 +112,10 @@ public class ChatV1Service {
                 enrollment.issuedToken(),
                 enrollment.expiresInSeconds(),
                 participant.toProfile());
+    }
+
+    public ProfileResponse currentProfile(String bearerToken) {
+        return new ProfileResponse(requireParticipant(bearerToken).toProfile());
     }
 
     public ConversationListResponse listConversations(String bearerToken, boolean archived) {

@@ -68,7 +68,8 @@ func listen(cfg Config, addr string) (*Instance, error) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	mux.Handle("/chat/v1/", chatRoutes)
+	// chatRoutes registers /chat/v1/* and /admin/chat/* (token rotation, etc.).
+	mux.Handle("/", chatRoutes)
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {

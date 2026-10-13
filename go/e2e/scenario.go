@@ -28,6 +28,14 @@ func RunChatV1Scenario(ctx context.Context, baseURL, token string) error {
 		return fmt.Errorf("health %s", health.Status)
 	}
 
+	profile, err := client.CurrentProfile(ctx)
+	if err != nil {
+		return fmt.Errorf("profile: %w", err)
+	}
+	if strings.TrimSpace(profile.Code) == "" || strings.TrimSpace(profile.DisplayName) == "" {
+		return fmt.Errorf("profile missing code or displayName: %+v", profile)
+	}
+
 	sess, err := client.CreateWithTitle(ctx, "e2e-room")
 	if err != nil {
 		return err

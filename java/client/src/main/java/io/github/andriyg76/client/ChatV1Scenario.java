@@ -1,6 +1,7 @@
 package io.github.andriyg76.client;
 
 import io.github.andriyg76.protocol.ConversationSession;
+import io.github.andriyg76.protocol.Profile;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
@@ -14,6 +15,11 @@ public final class ChatV1Scenario {
     public static void run(String baseUrl, String token) throws IOException, InterruptedException {
         ChatHttpClient client = new ChatHttpClient(baseUrl, token);
         client.health();
+        Profile profile = client.currentProfile();
+        if (profile.code() == null || profile.code().isBlank()
+                || profile.displayName() == null || profile.displayName().isBlank()) {
+            throw new IOException("profile missing code or displayName: " + profile);
+        }
         ConversationSession session = client.createWithTitle("e2e-room");
         ConversationSession updated = client.updateTitle(session.code(), "E2E Room");
         if (!"E2E Room".equals(updated.title())) {

@@ -55,6 +55,12 @@ public class ChatV1Controller {
         return chat.exchangeEnrollment(body.code());
     }
 
+    @GetMapping("/chat/v1/profile")
+    public io.github.andriyg76.protocol.ProfileResponse profile(
+            @RequestHeader(value = "Authorization", required = false) String authorization) {
+        return chat.currentProfile(bearer(authorization));
+    }
+
     @GetMapping("/chat/v1/conversations")
     public ConversationListResponse list(
             @RequestHeader(value = "Authorization", required = false) String authorization,

@@ -1,0 +1,124 @@
+name: Release to Maven Central
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: "Release version X.Y.P (Git tag vX.Y.P)"
+        required: true
+        default: "0.1.0"
+      module:
+        description: "Module(s) to deploy to Central"
+        type: choice
+        required: true
+        default: protocol,core,server
+        options:
+          - protocol,core,server
+          - protocol
+          - core
+          - server
+      branch:
+        description: "Branch (main or release/X.Y)"
+        required: true
+        default: main
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: java
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+
+      - name: Validate branch name
+        env:
+          BR: ${{ inputs.branch }}
+        run: |
+          if [ "$BR" != "main" ] && ! [[ "$BR" =~ ^release/[0-9]+\.[0-9]+$ ]]; then
+            echo "Branch must be main or release/X.Y"
+            exit 1
+          fi
+
+      - name: Validate release version
+        env:
+          V: ${{ inputs.release_version }}
+        run: |
+          if ! [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "release_version must be X.Y.P (no -SNAPSHOT)"
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Import GPG key
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Maven settings (Central Portal)
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+        run: |
+          mkdir -p ~/.m2
+          cat > ~/.m2/settings.xml <<EOF
+          <settings>
+            <servers>
+              <server>
+                <id>central</id>
+                <username>${MAVEN_CENTRAL_USERNAME}</username>
+                <password>${MAVEN_CENTRAL_PASSWORD}</password>
+              </server>
+            </servers>
+          </settings>
+          EOF
+
+      - name: Set release version in poms
+        env:
+          VERSION: ${{ inputs.release_version }}
+        run: bash scripts/set-reactor-version.sh "$VERSION"
+
+      - name: Commit and tag release
+        env:
+          VERSION: ${{ inputs.release_version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A pom.xml protocol/pom.xml core/pom.xml server/pom.xml client/pom.xml e2e/pom.xml test-server/pom.xml
+          git commit -m "Release ${VERSION}."
+          git tag -a "v${VERSION}" -m "Release ${VERSION}"
+
+      - name: Deploy to Maven Central
+        run: mvn -B -ntp clean deploy -Prelease -pl ${{ inputs.module }} -am -DskipTests
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+
+      - name: Restore X.Y-SNAPSHOT development version
+        env:
+          VERSION: ${{ inputs.release_version }}
+        run: |
+          XY="${VERSION%.*}"
+          bash scripts/set-reactor-version.sh "${XY}-SNAPSHOT"
+
+      - name: Commit SNAPSHOT and push
+        env:
+          VERSION: ${{ inputs.release_version }}
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          XY="${VERSION%.*}"
+          git add -A pom.xml protocol/pom.xml core/pom.xml server/pom.xml client/pom.xml e2e/pom.xml test-server/pom.xml
+          git commit -m "Prepare ${XY}-SNAPSHOT development."
+          git push origin "HEAD:${BRANCH}" "v${VERSION}"

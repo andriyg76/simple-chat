@@ -14,6 +14,8 @@ Shared text-chat **protocol** and reference **client/server** implementations in
 | [java/server](java/server) | Embeddable `ChatV1Service` |
 | [java/client](java/client) | Java reference client stub |
 | [SYNC.md](SYNC.md) | How to copy sources between products (no import / no vendor) |
+| [RELEASE.md](RELEASE.md) | `main` vs `release/X.Y` bugfix branches and Maven tags |
+| [java/MAVEN_CENTRAL.md](java/MAVEN_CENTRAL.md) | Publish `protocol` / `core` / `server` to Maven Central |
 
 Products implement the same `/chat/v1` contract; they may **duplicate** files from `go/pkg/` into their own tree rather than depending on this module.
 

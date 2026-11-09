@@ -1,6 +1,6 @@
 # Publish to Maven Central
 
-Published artifacts (version **0.1.0**):
+Published artifacts (example **0.1.0**):
 
 | Artifact | Coordinates |
 |----------|-------------|
@@ -10,11 +10,16 @@ Published artifacts (version **0.1.0**):
 
 Not published: `test-server`, `client`.
 
+Between releases the reactor version is **`X.Y-SNAPSHOT`** (see [RELEASE.md](../RELEASE.md)).
+
 ## One-time setup
 
-1. Register at [Central Portal](https://central.sonatype.com/) and claim namespace **`io.github.andriyg76`** (GitHub verification for `io.github.andriyg76.simple-chat` artifacts).
+1. Register at [Central Portal](https://central.sonatype.com/) and claim namespace **`io.github.andriyg76`**.
 2. Create a user token in the portal.
-3. Add to `~/.m2/settings.xml`:
+3. GitHub repo secrets: `MAVEN_CENTRAL_USERNAME`, `MAVEN_CENTRAL_PASSWORD`, `GPG_PRIVATE_KEY`, `GPG_PASSPHRASE`.
+4. GPG key registered in Sonatype profile.
+
+Local `~/.m2/settings.xml` (optional manual deploy):
 
 ```xml
 <settings>
@@ -28,25 +33,27 @@ Not published: `test-server`, `client`.
 </settings>
 ```
 
-4. GPG: publish a signing key and register it in your Sonatype profile.
+## Release workflow
 
-```bash
-gpg --full-generate-key
-gpg --keyserver keyserver.ubuntu.com --send-keys <KEY_ID>
-```
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) — **workflow_dispatch**:
 
-## Deploy command
+- **Release version** (default `0.1.0`) → `vX.Y.P` tag and release poms
+- **Module** (default all three libraries) → Maven `-pl`
+- **Branch** (default `main`)
+
+After deploy, poms return to **`X.Y-SNAPSHOT`** and are pushed with the tag.
+
+## Local version bump (without CI)
 
 From `java/`:
 
 ```bash
-mvn clean deploy -Prelease -pl protocol,core,server -am
+bash scripts/set-reactor-version.sh 0.1.2   # release
+bash scripts/set-reactor-version.sh 0.1-SNAPSHOT
 ```
 
-Or deploy the whole reactor (test-server and client are skipped):
+Manual deploy at a release version:
 
 ```bash
-mvn clean deploy -Prelease
+mvn clean deploy -Prelease -pl protocol,core,server -am
 ```
-
-Requires network, valid `central` credentials, and GPG signing on the `verify` phase.

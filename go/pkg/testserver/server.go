@@ -4,22 +4,26 @@ package testserver
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/andriyg76/simple-chat/go/pkg/chatcore"
 	"github.com/andriyg76/simple-chat/go/pkg/chathttp"
 	"github.com/andriyg76/simple-chat/go/pkg/session"
 )
 
 // Config matches the Java test-server defaults (token, enroll code, participant id).
 type Config struct {
-	Token            string
-	EnrollCode       string
-	ParticipantID    string
-	AdminToken       string
-	EmbeddedProfile  bool
+	Token           string
+	EnrollCode      string
+	ParticipantID   string
+	AdminToken      string
+	EmbeddedProfile bool
+	// EchoBot replies "echo: <text>" to every message in the participant's conversations.
+	EchoBot bool
 }
 
 // Instance is a running harness.
@@ -28,6 +32,7 @@ type Instance struct {
 	Token      string
 	EnrollCode string
 	HTTP       *http.Server
+	stopBot    context.CancelFunc
 }
 
 // DefaultConfig returns dev-style credentials.
@@ -89,7 +94,39 @@ func listen(cfg Config, addr string) (*Instance, error) {
 	go func() {
 		_ = srv.Serve(ln)
 	}()
-	return &Instance{BaseURL: strings.TrimRight(baseURL, "/"), Token: cfg.Token, EnrollCode: cfg.EnrollCode, HTTP: srv}, nil
+	inst := &Instance{BaseURL: strings.TrimRight(baseURL, "/"), Token: cfg.Token, EnrollCode: cfg.EnrollCode, HTTP: srv}
+	if cfg.EchoBot {
+		ctx, cancel := context.WithCancel(context.Background())
+		inst.stopBot = cancel
+		go runEchoBot(ctx, handler.Core(), cfg.ParticipantID)
+	}
+	return inst, nil
+}
+
+// Protocol senders are "client" or "server"; the bot speaks as the server.
+const echoBotSender = "server"
+
+func runEchoBot(ctx context.Context, core *chatcore.Core, participant string) {
+	cursor, _ := core.InboxCursor(ctx, participant)
+	for ctx.Err() == nil {
+		events, next, err := core.InboxNext(ctx, participant, cursor, 50, 25*time.Second)
+		if err != nil {
+			if ctx.Err() == nil {
+				log.Printf("echo bot: inbox read failed: %v", err)
+				cursor, _ = core.InboxCursor(ctx, participant)
+			}
+			continue
+		}
+		cursor = next
+		for _, event := range events {
+			if event.Kind != "message" || event.Sender == echoBotSender {
+				continue
+			}
+			if _, err := core.Publish(ctx, participant, event.SessionID, echoBotSender, "echo: "+event.Text, ""); err != nil {
+				log.Printf("echo bot: reply to %s failed: %v", event.SessionID, err)
+			}
+		}
+	}
 }
 
 func withDefaults(cfg Config) Config {
@@ -109,6 +146,9 @@ func withDefaults(cfg Config) Config {
 func (i *Instance) Shutdown(ctx context.Context) error {
 	if i == nil || i.HTTP == nil {
 		return nil
+	}
+	if i.stopBot != nil {
+		i.stopBot()
 	}
 	return i.HTTP.Shutdown(ctx)
 }

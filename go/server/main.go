@@ -26,12 +26,13 @@ func main() {
 		Token:         env("CHAT_TOKEN", "dev"),
 		EnrollCode:    env("CHAT_ENROLL_CODE", "dev"),
 		ParticipantID: env("CHAT_PARTICIPANT_ID", "default"),
+		EchoBot:       env("CHAT_ECHO_BOT", "") == "1",
 	}
 	inst, err := testserver.StartOnAddr(cfg, fmt.Sprintf(":%d", port))
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("simple-chat go server on %s (in-memory; no persistence)", inst.BaseURL)
+	log.Printf("simple-chat go server on %s (in-memory; no persistence; echo bot %t)", inst.BaseURL, cfg.EchoBot)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

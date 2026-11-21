@@ -23,6 +23,7 @@ func main() {
 		Token:         env("CHAT_TOKEN", "dev"),
 		EnrollCode:    env("CHAT_ENROLL_CODE", "dev"),
 		ParticipantID: env("CHAT_PARTICIPANT_ID", "default"),
+		EchoBot:       env("CHAT_ECHO_BOT", "") == "1",
 	}
 	inst, err := testserver.Start(cfg)
 	if err != nil {

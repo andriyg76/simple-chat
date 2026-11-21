@@ -7,6 +7,7 @@ import io.github.andriyg76.protocol.InboxEvent;
 import io.github.andriyg76.protocol.MessageSender;
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.io.Reader;
@@ -41,27 +42,30 @@ public final class SimpleChatClient {
 
     private final ChatHttpClient client;
     private final PrintStream out;
+    private final PrintStream err;
     private final Map<String, String> titles = new ConcurrentHashMap<>();
     private List<ConversationSession> rooms = List.of();
     private ConversationSession active;
 
-    private SimpleChatClient(ChatHttpClient client, PrintStream out) {
+    private SimpleChatClient(ChatHttpClient client, PrintStream out, PrintStream err) {
         this.client = client;
         this.out = out;
+        this.err = err;
     }
 
     public static void main(String[] args) {
         try {
-            System.exit(run(args));
+            System.exit(run(args, System.in, new PrintStream(System.out, true, StandardCharsets.UTF_8),
+                    new PrintStream(System.err, true, StandardCharsets.UTF_8), configPath()));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             System.exit(130);
         }
     }
 
-    static int run(String[] args) throws InterruptedException {
-        PrintStream out = new PrintStream(System.out, true, StandardCharsets.UTF_8);
-        Path configPath = configPath();
+    /** Runs one CLI session and returns the process exit code. */
+    public static int run(String[] args, InputStream stdin, PrintStream out, PrintStream err, Path configPath)
+            throws InterruptedException {
         String profile = null;
         String server = null;
         String enroll = null;
@@ -73,7 +77,7 @@ public final class SimpleChatClient {
                 return 0;
             }
             if (i + 1 >= args.length) {
-                System.err.printf("missing value for %s%n" + USAGE, arg, configPath);
+                err.printf("missing value for %s%n" + USAGE, arg, configPath);
                 return 2;
             }
             String value = args[++i];
@@ -83,13 +87,13 @@ public final class SimpleChatClient {
                 case "--enroll" -> enroll = value;
                 case "--token" -> token = value;
                 default -> {
-                    System.err.printf("unknown option %s%n" + USAGE, arg, configPath);
+                    err.printf("unknown option %s%n" + USAGE, arg, configPath);
                     return 2;
                 }
             }
         }
         if ((server == null) != (enroll == null && token == null) || (enroll != null && token != null)) {
-            System.err.printf("--server needs exactly one of --enroll or --token%n" + USAGE, configPath);
+            err.printf("--server needs exactly one of --enroll or --token%n" + USAGE, configPath);
             return 2;
         }
         try {
@@ -98,7 +102,7 @@ public final class SimpleChatClient {
             if (server != null) {
                 URI uri = URI.create(server);
                 if (!"http".equals(uri.getScheme()) && !"https".equals(uri.getScheme()) || uri.getHost() == null) {
-                    System.err.println("--server must be an http(s) URL, e.g. https://chat.example.com");
+                    err.println("--server must be an http(s) URL, e.g. https://chat.example.com");
                     return 2;
                 }
                 String displayName;
@@ -116,26 +120,26 @@ public final class SimpleChatClient {
             String baseUrl = config.getProperty(name + ".server");
             String savedToken = config.getProperty(name + ".token");
             if (baseUrl == null || savedToken == null) {
-                System.err.printf("no credentials for profile %s: run with --server URL --enroll CODE%n", name);
+                err.printf("no credentials for profile %s: run with --server URL --enroll CODE%n", name);
                 return 2;
             }
             config.setProperty("default", name);
             saveConfig(configPath, config);
             out.printf("Profile %s (%s) · %s%n", name, config.getProperty(name + ".displayName", name), baseUrl);
-            return new SimpleChatClient(new ChatHttpClient(baseUrl, savedToken), out).session();
+            return new SimpleChatClient(new ChatHttpClient(baseUrl, savedToken), out, err).session(stdin);
         } catch (ChatHttpClient.HttpStatusException e) {
-            System.err.println(e.status() == 401 || e.status() == 403
+            err.println(e.status() == 401 || e.status() == 403
                     ? "server rejected the credentials; enroll again with --server URL --enroll CODE"
                     : e.getMessage());
             return 1;
         } catch (IOException | IllegalArgumentException e) {
-            System.err.println("error: " + e.getMessage());
+            err.println("error: " + e.getMessage());
             return 1;
         }
     }
 
-    private int session() throws IOException, InterruptedException {
-        BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
+    private int session(InputStream stdin) throws IOException, InterruptedException {
+        BufferedReader in = new BufferedReader(new InputStreamReader(stdin, StandardCharsets.UTF_8));
         refreshRooms();
         printRooms();
         out.print("Open number or Enter for a new room: ");
@@ -165,7 +169,7 @@ public final class SimpleChatClient {
                         client.postPlain(active.code(), line);
                     }
                 } catch (IOException e) {
-                    System.err.println("error: " + e.getMessage());
+                    err.println("error: " + e.getMessage());
                 }
             }
         } finally {
@@ -190,7 +194,7 @@ public final class SimpleChatClient {
             case "/use" -> {
                 ConversationSession picked = pick(arg);
                 if (picked == null) {
-                    System.err.println("unknown room; use /list and /use N");
+                    err.println("unknown room; use /list and /use N");
                 } else {
                     active = picked;
                     out.println("Active room: " + label(active));
@@ -202,7 +206,7 @@ public final class SimpleChatClient {
             }
             case "/title" -> {
                 if (arg.isEmpty()) {
-                    System.err.println("usage: /title NAME");
+                    err.println("usage: /title NAME");
                 } else {
                     active = client.updateTitle(active.code(), arg);
                     titles.put(active.code(), active.title());
@@ -218,7 +222,7 @@ public final class SimpleChatClient {
                 client.removeMember(active.code(), arg);
                 out.println("Removed " + arg);
             }
-            default -> System.err.println("unknown command; " + COMMANDS);
+            default -> err.println("unknown command; " + COMMANDS);
         }
         return true;
     }
@@ -229,7 +233,7 @@ public final class SimpleChatClient {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (IOException e) {
-            System.err.println("inbox delivery stopped: " + e.getMessage());
+            err.println("inbox delivery stopped: " + e.getMessage());
         }
     }
 
@@ -241,7 +245,7 @@ public final class SimpleChatClient {
                     out.printf("[%s] %s%n", room, event.text());
                 }
             }
-            case EventKind.ERROR -> System.err.printf("[%s] error: %s%n", room, event.text());
+            case EventKind.ERROR -> err.printf("[%s] error: %s%n", room, event.text());
             default -> {
             }
         }

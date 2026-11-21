@@ -32,6 +32,7 @@ mvn -pl test-server spring-boot:run
 ```
 
 Binds to a **random free port** (`server.port=0`); the chosen URL is printed on startup. Default token/enroll code: `dev`.
+Add `--simplechat.echo-bot=true` (or `SIMPLECHAT_ECHO_BOT=true`) to reply `echo: <text>` as sender `server` to every message.
 
 ## Terminal client
 

@@ -49,10 +49,22 @@ public class ChatTestServerConfig {
     }
 
     @Bean
+    InMemoryConversationStore conversationStore() {
+        return new InMemoryConversationStore();
+    }
+
+    @Bean
+    ChatCore chatCore(InMemoryConversationStore store) {
+        return new ChatCore(store);
+    }
+
+    @Bean
     ChatV1Service chatV1Service(
             @Value("${simplechat.token}") String token,
             @Value("${simplechat.enroll-code}") String enrollCode,
             @Value("${simplechat.participant-id}") String participantId,
+            ChatCore core,
+            InMemoryConversationStore store,
             InboxPresence inboxPresence,
             DeviceStore deviceStore,
             PushNotifier pushNotifier) {
@@ -60,8 +72,6 @@ public class ChatTestServerConfig {
                 ? Optional.of(new ChatParticipant(participantId, participantId, ProfileRole.USER))
                 : Optional.empty();
         EnrollmentSettings enrollment = new EnrollmentSettings(enrollCode, token, 30L * 24 * 60 * 60);
-        InMemoryConversationStore store = new InMemoryConversationStore();
-        return new ChatV1Service(
-                new ChatCore(store), auth, enrollment, store, deviceStore, inboxPresence, pushNotifier);
+        return new ChatV1Service(core, auth, enrollment, store, deviceStore, inboxPresence, pushNotifier);
     }
 }

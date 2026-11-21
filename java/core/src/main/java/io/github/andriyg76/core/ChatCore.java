@@ -82,6 +82,21 @@ public final class ChatCore {
         inbox.emitToMembers(store, membersStore, actor, conversationCode, kind, text);
     }
 
+    /**
+     * Revokes a removed member's access to buffered events: redacts the conversation from their inbox and wakes
+     * readers waiting on the conversation so they re-check membership.
+     */
+    public void memberRemoved(String conversationCode, String profileId) {
+        inbox.redactConversation(profileId, conversationCode);
+        Journal journal = journal(conversationCode);
+        journal.lock.lock();
+        try {
+            journal.signalAll();
+        } finally {
+            journal.lock.unlock();
+        }
+    }
+
     public List<String> deliveryRecipients(String actor, String conversationCode) {
         return inbox.deliveryRecipients(store, membersStore, actor, conversationCode);
     }
@@ -132,6 +147,8 @@ public final class ChatCore {
                 }
                 for (ChatEvent event : journal.events) {
                     if (event.cursor() > cursor) {
+                        // Membership may have changed while this reader waited.
+                        requireSession(participantId, conversationCode);
                         return new NextResult(event, true);
                     }
                 }

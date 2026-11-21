@@ -170,6 +170,10 @@ func (c *Core) Next(ctx context.Context, participant, id string, cursor int64, t
 		for _, event := range j.events {
 			if event.Cursor > cursor {
 				j.mu.Unlock()
+				// Membership may have changed while this reader waited.
+				if _, err := c.Session(ctx, participant, id); err != nil {
+					return Event{}, false, err
+				}
 				return event, true, nil
 			}
 		}
@@ -189,4 +193,13 @@ func (c *Core) Next(ctx context.Context, participant, id string, cursor int64, t
 			timer.Stop()
 		}
 	}
+}
+
+// wakeConversation releases readers waiting in Next so they re-check membership.
+func (c *Core) wakeConversation(id string) {
+	j := c.journal(id)
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	close(j.wake)
+	j.wake = make(chan struct{})
 }

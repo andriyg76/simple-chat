@@ -145,8 +145,14 @@ func (c *Core) InboxNext(ctx context.Context, participant string, inboxCursor in
 			return nil, 0, ErrInvalidCursor
 		}
 		var batch []InboxEvent
+		advanced := inboxCursor
 		for _, event := range j.events {
-			if event.InboxCursor > inboxCursor {
+			if event.InboxCursor <= inboxCursor {
+				continue
+			}
+			advanced = event.InboxCursor
+			// Redacted entries keep cursor positions stable but are never delivered.
+			if event.Kind != "" {
 				batch = append(batch, event)
 				if len(batch) >= limit {
 					break
@@ -155,9 +161,8 @@ func (c *Core) InboxNext(ctx context.Context, participant string, inboxCursor in
 		}
 		wake := j.wake
 		j.mu.Unlock()
-		if len(batch) > 0 {
-			last := batch[len(batch)-1].InboxCursor
-			return batch, last, nil
+		if advanced > inboxCursor {
+			return batch, advanced, nil
 		}
 		if timeout <= 0 {
 			return nil, inboxCursor, nil
@@ -171,6 +176,19 @@ func (c *Core) InboxNext(ctx context.Context, participant string, inboxCursor in
 			return nil, inboxCursor, nil
 		case <-wake:
 			timer.Stop()
+		}
+	}
+}
+
+// redactInboxConversation turns a former member's buffered events for a conversation into cursor-only
+// placeholders, so they are never delivered while existing cursors stay valid.
+func (c *Core) redactInboxConversation(profileID, conversationCode string) {
+	j := c.inboxJournal(profileID)
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	for i, event := range j.events {
+		if event.SessionID == conversationCode {
+			j.events[i] = InboxEvent{InboxCursor: event.InboxCursor}
 		}
 	}
 }

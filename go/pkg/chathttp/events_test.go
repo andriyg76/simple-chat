@@ -45,6 +45,7 @@ func TestInboxSSEReplayHeartbeatAndDisconnect(t *testing.T) {
 	reqCtx, cancel := context.WithCancel(context.Background())
 	req, _ := http.NewRequestWithContext(reqCtx, http.MethodGet, server.URL, nil)
 	req.Header.Set("Last-Event-ID", "0")
+	req.Header.Set("Authorization", "Bearer secret")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -86,6 +87,7 @@ func TestInboxSSERejectsExpiredCursorBeforeHeaders(t *testing.T) {
 	}
 	req = httptest.NewRequest(http.MethodGet, "/inbox/events", nil)
 	req.Header.Set("Last-Event-ID", "1")
+	req.Header.Set("Authorization", "Bearer secret")
 	reqCtx, cancel := context.WithCancel(req.Context())
 	cancel()
 	req = req.WithContext(reqCtx)
@@ -103,5 +105,29 @@ func TestInboxSSERequiresBearerBeforeOpeningStream(t *testing.T) {
 	h.Routes().ServeHTTP(w, req)
 	if w.Code != http.StatusUnauthorized || !strings.Contains(w.Body.String(), "unauthorized") {
 		t.Fatalf("response = %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestInboxSSEEndsWhenCredentialsNoLongerResolve(t *testing.T) {
+	h := testHandler()
+	previous := heartbeatInterval
+	heartbeatInterval = 10 * time.Millisecond
+	defer func() { heartbeatInterval = previous }()
+	req := httptest.NewRequest(http.MethodGet, "/inbox/events", nil)
+	req.Header.Set("Last-Event-ID", "0")
+	req.Header.Set("Authorization", "Bearer revoked")
+	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		h.streamInbox(w, req, "owner")
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stream kept running with credentials that no longer resolve")
+	}
+	if strings.Contains(w.Body.String(), "heartbeat") {
+		t.Fatalf("heartbeat written after credentials stopped resolving: %q", w.Body.String())
 	}
 }

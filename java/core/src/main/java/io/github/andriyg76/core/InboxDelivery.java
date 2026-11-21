@@ -72,16 +72,21 @@ public final class InboxDelivery {
                     throw ChatException.invalidInboxCursor("invalid cursor");
                 }
                 List<InboxEvent> batch = new ArrayList<>();
+                long advanced = inboxCursor;
                 for (InboxEvent event : journal.events) {
-                    if (event.inboxCursor() > inboxCursor) {
+                    if (event.inboxCursor() <= inboxCursor) {
+                        continue;
+                    }
+                    advanced = event.inboxCursor();
+                    // Redacted entries keep cursor positions stable but are never delivered.
+                    if (event.kind() != null) {
                         batch.add(event);
                         if (batch.size() >= limit) {
                             break;
                         }
                     }
                 }
-                if (!batch.isEmpty()) {
-                    long advanced = batch.getLast().inboxCursor();
+                if (advanced > inboxCursor) {
                     return new InboxNextResult(batch, advanced);
                 }
                 if (timeoutMillis <= 0) {
@@ -98,6 +103,22 @@ public final class InboxDelivery {
                     return new InboxNextResult(List.of(), inboxCursor);
                 }
             }
+        } finally {
+            journal.lock.unlock();
+        }
+    }
+
+    /**
+     * Removes a conversation's undelivered and replayable entries from a former member's journal. Entries become
+     * cursor-only placeholders so existing cursors stay valid.
+     */
+    void redactConversation(String profileId, String conversationCode) {
+        InboxJournal journal = journal(profileId);
+        journal.lock.lock();
+        try {
+            journal.events.replaceAll(event -> conversationCode.equals(event.sessionId())
+                    ? new InboxEvent(event.inboxCursor(), 0, null, null, null, null, null, null, null)
+                    : event);
         } finally {
             journal.lock.unlock();
         }

@@ -121,6 +121,9 @@ func (h *Handler) streamInbox(w http.ResponseWriter, r *http.Request, participan
 				cursor = advanced
 			}
 			if len(events) == 0 {
+				if !h.stillAuthenticated(r, participant) {
+					return
+				}
 				if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
 					return
 				}
@@ -135,6 +138,9 @@ func (h *Handler) streamInbox(w http.ResponseWriter, r *http.Request, participan
 			cursor = event.InboxCursor
 			found = false
 			continue
+		}
+		if !h.stillAuthenticated(r, participant) {
+			return
 		}
 		data, err := json.Marshal(event)
 		if err != nil {

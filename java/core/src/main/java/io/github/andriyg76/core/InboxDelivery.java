@@ -43,7 +43,10 @@ public final class InboxDelivery {
             String conversationCode,
             String kind,
             String text) {
-        List<String> recipients = recipients(store, members, actor, conversationCode);
+        emitTo(recipients(store, members, actor, conversationCode), conversationCode, kind, text);
+    }
+
+    void emitTo(List<String> recipients, String conversationCode, String kind, String text) {
         InboxEvent template = new InboxEvent(0, 0, conversationCode, null, null, null, kind, text, Instant.now());
         for (String profileId : recipients) {
             append(profileId, template);

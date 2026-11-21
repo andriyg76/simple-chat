@@ -21,6 +21,7 @@ import io.github.andriyg76.protocol.Profile;
 import io.github.andriyg76.protocol.ProfileResponse;
 import io.github.andriyg76.protocol.UpdateConversationRequest;
 import java.time.Duration;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Executor;
@@ -199,10 +200,11 @@ public class ChatV1Service {
         if (members == null) {
             throw new ChatException("members_not_supported", 501, "members not supported");
         }
+        // Captured before the removal: a member who leaves can no longer list the conversation's members.
+        List<String> recipients = core.deliveryRecipients(p.id(), conversationCode);
         members.removeMember(p.id(), conversationCode, profileId);
         core.memberRemoved(conversationCode, profileId);
-        core.emitInboxToMembers(
-                p.id(), conversationCode, "member_removed", "{\"profileId\":\"" + profileId + "\"}");
+        core.emitInboxTo(recipients, conversationCode, "member_removed", "{\"profileId\":\"" + profileId + "\"}");
     }
 
     public io.github.andriyg76.protocol.InboxCursorResponse inboxCursor(String bearerToken) {

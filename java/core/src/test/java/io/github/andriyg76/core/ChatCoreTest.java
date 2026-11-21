@@ -53,4 +53,21 @@ class ChatCoreTest {
         assertTrue(core.inboxNext("guest", feed.inboxCursor(), 50, 0L).events().isEmpty());
         assertThrows(ChatException.class, () -> core.next("guest", shared.code(), 0L, 0L));
     }
+
+    @Test
+    void memberLeavingNotifiesMembersCapturedBeforeRemoval() {
+        var store = new InMemoryConversationStore();
+        var core = new ChatCore(store);
+        core.attachMembersStore(store);
+        var shared = core.create("owner");
+        store.addMember("owner", shared.code(), "guest");
+        var recipients = core.deliveryRecipients("guest", shared.code());
+
+        store.removeMember("guest", shared.code(), "guest");
+        core.memberRemoved(shared.code(), "guest");
+        core.emitInboxTo(recipients, shared.code(), "member_removed", "{\"profileId\":\"guest\"}");
+
+        var feed = core.inboxNext("owner", 0L, 50, 0L);
+        assertEquals("member_removed", feed.events().getLast().kind());
+    }
 }

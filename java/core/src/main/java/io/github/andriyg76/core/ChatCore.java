@@ -82,6 +82,11 @@ public final class ChatCore {
         inbox.emitToMembers(store, membersStore, actor, conversationCode, kind, text);
     }
 
+    /** Delivers a metadata event to an explicit recipient list, e.g. members captured before a removal. */
+    public void emitInboxTo(List<String> recipients, String conversationCode, String kind, String text) {
+        inbox.emitTo(recipients, conversationCode, kind, text);
+    }
+
     /**
      * Revokes a removed member's access to buffered events: redacts the conversation from their inbox and wakes
      * readers waiting on the conversation so they re-check membership.

@@ -43,6 +43,21 @@ Patch releases: run the workflow on **`release/0.1`** with e.g. **`0.1.1`**, **`
 
 Forward-port fixes from `release/X.Y` to `main` when needed.
 
+## Snapshots
+
+Every push to **`main`** or **`release/**`** that touches `java/` (including merged PRs) runs
+[`.github/workflows/snapshot.yml`](.github/workflows/snapshot.yml), which deploys `protocol`, `core` and
+`server` at the current **`X.Y-SNAPSHOT`** to the Central snapshot repository. Consumers add:
+
+```xml
+<repository>
+  <id>central-snapshots</id>
+  <url>https://central.sonatype.com/repository/maven-snapshots/</url>
+  <releases><enabled>false</enabled></releases>
+  <snapshots><enabled>true</enabled></snapshots>
+</repository>
+```
+
 ## CI
 
 Push / PR to **`main`** or **`release/**`**: [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (tests only).

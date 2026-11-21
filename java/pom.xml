@@ -11,7 +11,7 @@
 
     <name>Simple Chat Java</name>
     <description>Portable /chat/v1 protocol libraries (JDK only)</description>
-    <url>https://github.com/agushuley/simple-chat</url>
+    <url>https://github.com/andriyg76/simple-chat</url>
 
     <licenses>
         <license>
@@ -29,9 +29,9 @@
     </developers>
 
     <scm>
-        <connection>scm:git:https://github.com/agushuley/simple-chat.git</connection>
-        <developerConnection>scm:git:ssh://git@github.com/agushuley/simple-chat.git</developerConnection>
-        <url>https://github.com/agushuley/simple-chat</url>
+        <connection>scm:git:https://github.com/andriyg76/simple-chat.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com/andriyg76/simple-chat.git</developerConnection>
+        <url>https://github.com/andriyg76/simple-chat</url>
     </scm>
 
     <modules>

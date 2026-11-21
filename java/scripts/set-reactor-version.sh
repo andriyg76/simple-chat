@@ -9,5 +9,7 @@ mvn -B -ntp versions:update-child-modules -DgenerateBackupPoms=false
 
 TEST_SERVER="${ROOT}/test-server/pom.xml"
 if [[ -f "${TEST_SERVER}" ]]; then
-  sed -i "s|<chat.lib.version>[^<]*</chat.lib.version>|<chat.lib.version>${NEW}</chat.lib.version>|" "${TEST_SERVER}"
+  # -i.bak works with both GNU and BSD (macOS) sed.
+  sed -i.bak "s|<chat.lib.version>[^<]*</chat.lib.version>|<chat.lib.version>${NEW}</chat.lib.version>|" "${TEST_SERVER}"
+  rm -f "${TEST_SERVER}.bak"
 fi

@@ -2,14 +2,16 @@
 
 ## Development versions
 
-Java reactor (`java/pom.xml` and modules) uses **`X.Y-SNAPSHOT`** on **`main`** and **`release/X.Y`** between releases.
+Java reactor (`java/pom.xml` and modules) is always a snapshot between releases, and each branch owns its own
+snapshot so the snapshot repository never mixes them: **`main`** is at the next minor (**`X.(Y+1)-SNAPSHOT`**
+once **`X.Y.0`** is out), **`release/X.Y`** is at **`X.Y-SNAPSHOT`**.
 
 ## Branches
 
 | Branch | Purpose |
 |--------|---------|
-| **`main`** | Integration; next **X.Y.0** from snapshot. |
-| **`release/X.Y`** | Patch line (**X.Y.*** bugfixes). |
+| **`main`** | Integration; releases **X.Y.0** only. |
+| **`release/X.Y`** | Patch line (**X.Y.P**, P ≥ 1). |
 
 ## Publish (GitHub Actions)
 
@@ -17,26 +19,31 @@ Java reactor (`java/pom.xml` and modules) uses **`X.Y-SNAPSHOT`** on **`main`** 
 
 | Input | Default | Meaning |
 |-------|---------|---------|
-| **Release version** | `0.1.0` | **`X.Y.P`** — sets poms, tag **`vX.Y.P`**, deploy |
-| **Module(s)** | `protocol,core,server` | `-pl` for Central (or single artifact) |
+| **Release version** | `0.1.0` | **`X.Y.P`** — `X.Y.0` from `main`, `X.Y.P` from `release/X.Y` |
 | **Branch** | `main` | `main` or `release/X.Y` |
+
+`protocol`, `core` and `server` share one version and one tag, so they are always released together.
 
 The workflow:
 
-1. Sets all reactor poms to **`X.Y.P`**
-2. Commits, tags **`vX.Y.P`**
-3. **`mvn deploy -Prelease`** for the chosen module(s)
-4. Sets poms back to **`X.Y-SNAPSHOT`** (major.minor from the release)
-5. Commits and pushes the branch **and** the tag
-6. Creates a GitHub release for the tag with the commits since the previous `v*` tag
+1. Sets all reactor poms to **`X.Y.P`**, commits, tags **`vX.Y.P`** and pushes the commit and tag
+   atomically **before** publishing (a moved branch fails the run with nothing published)
+2. **`mvn deploy -Prelease`** for `protocol,core,server` (skipped when the version is already on Central)
+3. Sets the branch to its next snapshot (`main` → `X.(Y+1)-SNAPSHOT`, `release/X.Y` → `X.Y-SNAPSHOT`)
+4. Creates a GitHub release for the tag with the commits since the previous `v*` tag
+
+A failed run can simply be re-run with the same inputs: an existing tag is reused, an already published
+version is not deployed again, and an existing GitHub release is kept.
 
 Secrets: see [java/MAVEN_CENTRAL.md](java/MAVEN_CENTRAL.md).
 
-After the first **`0.1.0`** release from `main`, create the maintenance branch:
+Create a maintenance branch from a release tag and move it to its snapshot:
 
 ```bash
 git fetch origin
 git checkout -b release/0.1 v0.1.0
+(cd java && bash scripts/set-reactor-version.sh 0.1-SNAPSHOT)
+git commit -am "Prepare 0.1-SNAPSHOT development."
 git push -u origin release/0.1
 ```
 

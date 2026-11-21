@@ -4,19 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       release_version:
-        description: "Release version X.Y.P (Git tag vX.Y.P)"
+        description: "Release version X.Y.P (Git tag vX.Y.P); main releases X.Y.0, release/X.Y releases X.Y.P"
         required: true
         default: "0.1.0"
-      module:
-        description: "Module(s) to deploy to Central"
-        type: choice
-        required: true
-        default: protocol,core,server
-        options:
-          - protocol,core,server
-          - protocol
-          - core
-          - server
       branch:
         description: "Branch (main or release/X.Y)"
         required: true
@@ -24,6 +14,14 @@ on:
 
 permissions:
   contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  # protocol, core and server share one version and one vX.Y.P tag, so they are always released together.
+  MODULES: protocol,core,server
 
 jobs:
   publish:
@@ -37,21 +35,21 @@ jobs:
           ref: ${{ inputs.branch }}
           fetch-depth: 0
 
-      - name: Validate branch name
+      - name: Validate branch and version
         env:
           BR: ${{ inputs.branch }}
-        run: |
-          if [ "$BR" != "main" ] && ! [[ "$BR" =~ ^release/[0-9]+\.[0-9]+$ ]]; then
-            echo "Branch must be main or release/X.Y"
-            exit 1
-          fi
-
-      - name: Validate release version
-        env:
           V: ${{ inputs.release_version }}
         run: |
-          if ! [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          if ! [[ "$V" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
             echo "release_version must be X.Y.P (no -SNAPSHOT)"
+            exit 1
+          fi
+          XY="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+          P="${BASH_REMATCH[3]}"
+          if [ "$BR" = "main" ]; then
+            [ "$P" = "0" ] || { echo "main releases X.Y.0; patch releases go from release/${XY}"; exit 1; }
+          elif [ "$BR" != "release/${XY}" ]; then
+            echo "Branch must be main or release/${XY} for ${V}"
             exit 1
           fi
 
@@ -85,52 +83,72 @@ jobs:
           </settings>
           EOF
 
-      - name: Set release version in poms
-        env:
-          VERSION: ${{ inputs.release_version }}
-        run: bash scripts/set-reactor-version.sh "$VERSION"
-
-      - name: Commit and tag release
-        env:
-          VERSION: ${{ inputs.release_version }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A pom.xml protocol/pom.xml core/pom.xml server/pom.xml client/pom.xml e2e/pom.xml test-server/pom.xml
-          git commit -m "Release ${VERSION}."
-          git tag -a "v${VERSION}" -m "Release ${VERSION}"
-
-      - name: Deploy to Maven Central
-        run: mvn -B -ntp clean deploy -Prelease -pl ${{ inputs.module }} -am -DskipTests
-        env:
-          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-
-      - name: Restore X.Y-SNAPSHOT development version
-        env:
-          VERSION: ${{ inputs.release_version }}
-        run: |
-          XY="${VERSION%.*}"
-          bash scripts/set-reactor-version.sh "${XY}-SNAPSHOT"
-
-      - name: Commit SNAPSHOT and push
+      - name: Reserve release commit and tag
+        id: reserve
         env:
           VERSION: ${{ inputs.release_version }}
           BRANCH: ${{ inputs.branch }}
         run: |
-          XY="${VERSION%.*}"
+          TAG="v${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null; then
+            echo "::notice::${TAG} already exists; resuming from it"
+            git fetch -q origin "refs/tags/${TAG}:refs/tags/${TAG}"
+            git checkout -q "${TAG}"
+            exit 0
+          fi
+          bash scripts/set-reactor-version.sh "$VERSION"
           git add -A pom.xml protocol/pom.xml core/pom.xml server/pom.xml client/pom.xml e2e/pom.xml test-server/pom.xml
-          git commit -m "Prepare ${XY}-SNAPSHOT development."
-          git push origin "HEAD:${BRANCH}" "v${VERSION}"
+          git commit -m "Release ${VERSION}."
+          git tag -a "${TAG}" -m "Release ${VERSION}"
+          # Atomic, before publishing: if the branch moved, nothing is pushed and nothing reaches Central.
+          git push --atomic origin "HEAD:${BRANCH}" "${TAG}"
+
+      - name: Deploy to Maven Central
+        env:
+          VERSION: ${{ inputs.release_version }}
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          POM="https://repo1.maven.org/maven2/io/github/andriyg76/simple-chat/server/${VERSION}/server-${VERSION}.pom"
+          if curl -sfI "$POM" >/dev/null; then
+            echo "::notice::${VERSION} is already on Maven Central; skipping deploy"
+            exit 0
+          fi
+          mvn -B -ntp clean deploy -Prelease -pl "$MODULES" -am -DskipTests
+
+      - name: Set next development version
+        env:
+          VERSION: ${{ inputs.release_version }}
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          git fetch -q origin "$BRANCH"
+          git checkout -q -B "$BRANCH" "origin/$BRANCH"
+          CURRENT=$(mvn -q -B -ntp help:evaluate -Dexpression=project.version -DforceStdout)
+          if [ "$CURRENT" != "$VERSION" ]; then
+            echo "::notice::${BRANCH} is at ${CURRENT}; development version already set"
+            exit 0
+          fi
+          X="${VERSION%%.*}"; REST="${VERSION#*.}"; Y="${REST%%.*}"
+          # main moves to the next minor so it never shares a snapshot with release/X.Y.
+          if [ "$BRANCH" = "main" ]; then NEXT="${X}.$((Y + 1))-SNAPSHOT"; else NEXT="${X}.${Y}-SNAPSHOT"; fi
+          bash scripts/set-reactor-version.sh "$NEXT"
+          git add -A pom.xml protocol/pom.xml core/pom.xml server/pom.xml client/pom.xml e2e/pom.xml test-server/pom.xml
+          git commit -m "Prepare ${NEXT} development."
+          git push origin "HEAD:${BRANCH}" || { git pull -q --rebase origin "$BRANCH" && git push origin "HEAD:${BRANCH}"; }
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.release_version }}
-          MODULES: ${{ inputs.module }}
         run: |
           TAG="v${VERSION}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::GitHub release ${TAG} already exists"
+            exit 0
+          fi
           PREV=$(git describe --tags --abbrev=0 --match 'v*' "${TAG}^" 2>/dev/null || true)
           RANGE="${PREV:+${PREV}..}${TAG}"
           {

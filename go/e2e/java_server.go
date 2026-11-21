@@ -48,10 +48,11 @@ func startJavaTestServer(t *testing.T) (baseURL, token string, stop func()) {
 	if err := pack.Run(); err != nil {
 		t.Fatalf("mvn package: %v", err)
 	}
-	jar := filepath.Join(javaDir, "test-server", "target", "test-server-0.1.0-SNAPSHOT-exec.jar")
-	if _, err := os.Stat(jar); err != nil {
-		t.Fatalf("missing jar %s: %v", jar, err)
+	jars, err := filepath.Glob(filepath.Join(javaDir, "test-server", "target", "test-server-*-exec.jar"))
+	if err != nil || len(jars) != 1 {
+		t.Fatalf("expected one test-server exec jar, found %v (err %v)", jars, err)
 	}
+	jar := jars[0]
 	runCtx, runCancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(runCtx, "java", "-jar", jar)
 	stdout, err := cmd.StdoutPipe()

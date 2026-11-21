@@ -31,16 +31,23 @@ public final class ChatHttpClient {
                 HttpResponse.BodyHandlers.ofString());
         expect(resp, 200);
         String body = resp.body();
-        int profileKey = body.indexOf("\"profile\":");
+        int profileKey = body.indexOf("\"profile\"");
         String slice = profileKey >= 0 ? body.substring(profileKey) : body;
-        String role = Json.field(slice, "role");
-        ProfileRole profileRole = "admin".equals(role) ? ProfileRole.ADMIN : ProfileRole.USER;
         return new Profile(
                 Json.field(slice, "code"),
                 Json.field(slice, "displayName"),
-                profileRole,
+                role(Json.field(slice, "role")),
                 null,
                 null);
+    }
+
+    private static ProfileRole role(String wire) throws IOException {
+        for (ProfileRole role : ProfileRole.values()) {
+            if (role.wire().equals(wire)) {
+                return role;
+            }
+        }
+        throw new IOException("unexpected profile role: " + wire);
     }
 
     public void health() throws IOException, InterruptedException {
@@ -173,24 +180,66 @@ public final class ChatHttpClient {
         }
 
         static String field(String json, String name) {
-            String key = "\"" + name + "\":";
-            int i = json.indexOf(key);
+            int i = valueStart(json, name);
             if (i < 0) {
                 return null;
             }
-            i += key.length();
-            if (i < json.length() && json.charAt(i) == '"') {
-                int end = json.indexOf('"', i + 1);
-                while (end > 0 && json.charAt(end - 1) == '\\') {
-                    end = json.indexOf('"', end + 1);
-                }
-                return json.substring(i + 1, end);
+            if (json.charAt(i) == '"') {
+                return readString(json, i);
             }
             int end = i;
             while (end < json.length() && "0123456789".indexOf(json.charAt(end)) >= 0) {
                 end++;
             }
             return json.substring(i, end);
+        }
+
+        /** Index of the first value character after {@code "name"} and its colon, or -1. */
+        private static int valueStart(String json, String name) {
+            String key = "\"" + name + "\"";
+            for (int k = json.indexOf(key); k >= 0; k = json.indexOf(key, k + 1)) {
+                int i = skipWhitespace(json, k + key.length());
+                if (i < json.length() && json.charAt(i) == ':') {
+                    i = skipWhitespace(json, i + 1);
+                    return i < json.length() ? i : -1;
+                }
+            }
+            return -1;
+        }
+
+        private static int skipWhitespace(String json, int i) {
+            while (i < json.length() && Character.isWhitespace(json.charAt(i))) {
+                i++;
+            }
+            return i;
+        }
+
+        private static String readString(String json, int quote) {
+            StringBuilder out = new StringBuilder();
+            for (int i = quote + 1; i < json.length(); i++) {
+                char c = json.charAt(i);
+                if (c == '"') {
+                    return out.toString();
+                }
+                if (c != '\\') {
+                    out.append(c);
+                    continue;
+                }
+                char e = json.charAt(++i);
+                switch (e) {
+                    case 'b' -> out.append('\b');
+                    case 'f' -> out.append('\f');
+                    case 'n' -> out.append('\n');
+                    case 'r' -> out.append('\r');
+                    case 't' -> out.append('\t');
+                    case 'u' -> {
+                        out.append((char) Integer.parseInt(json.substring(i + 1, i + 5), 16));
+                        i += 4;
+                    }
+                    default -> out.append(e);
+                }
+            }
+            throw new IllegalArgumentException("unterminated JSON string");
         }
 
         static List<String> inboxEvents(String feedJson) {

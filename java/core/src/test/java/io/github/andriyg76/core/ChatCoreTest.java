@@ -30,4 +30,27 @@ class ChatCoreTest {
         var session = core.create("user-1");
         assertThrows(ChatException.class, () -> core.publish("other", session.code(), MessageSender.CLIENT, "x", null));
     }
+
+    @Test
+    void removedMemberLosesBufferedConversationEvents() {
+        var store = new InMemoryConversationStore();
+        var core = new ChatCore(store);
+        core.attachMembersStore(store);
+        var shared = core.create("owner");
+        var own = core.create("guest");
+        store.addMember("owner", shared.code(), "guest");
+        core.publish("owner", shared.code(), MessageSender.CLIENT, "secret 1", null);
+        core.publish("guest", own.code(), MessageSender.CLIENT, "mine", null);
+        core.publish("owner", shared.code(), MessageSender.CLIENT, "secret 2", null);
+
+        store.removeMember("owner", shared.code(), "guest");
+        core.memberRemoved(shared.code(), "guest");
+
+        var feed = core.inboxNext("guest", 0L, 50, 0L);
+        assertEquals(1, feed.events().size());
+        assertEquals("mine", feed.events().getFirst().text());
+        assertEquals(3L, feed.inboxCursor());
+        assertTrue(core.inboxNext("guest", feed.inboxCursor(), 50, 0L).events().isEmpty());
+        assertThrows(ChatException.class, () -> core.next("guest", shared.code(), 0L, 0L));
+    }
 }

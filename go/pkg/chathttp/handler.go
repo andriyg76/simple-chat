@@ -350,33 +350,46 @@ func (h *Handler) plainMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) authenticate(w http.ResponseWriter, r *http.Request) (string, bool) {
+	id, message := h.resolveParticipant(r)
+	if message != "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized", message)
+		return "", false
+	}
+	return id, true
+}
+
+// resolveParticipant returns the request's participant, or an error message when it is not authenticated.
+func (h *Handler) resolveParticipant(r *http.Request) (string, string) {
 	if h.identityFromContext {
 		id := participantFromContext(r.Context())
 		if id == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized", "chat participant missing from context")
-			return "", false
+			return "", "chat participant missing from context"
 		}
-		return id, true
+		return id, ""
 	}
 	if id := participantFromContext(r.Context()); id != "" {
-		return id, true
+		return id, ""
 	}
 	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 	if token == "" {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "bearer token is required")
-		return "", false
+		return "", "bearer token is required"
 	}
 	if h.tokens != nil {
 		profile, ok := h.tokens.Resolve(token)
 		if ok {
-			return profile.Code, true
+			return profile.Code, ""
 		}
 	}
 	if h.bearerToken != "" && token != h.bearerToken {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid or expired bearer token")
-		return "", false
+		return "", "invalid or expired bearer token"
 	}
-	return h.participantID, true
+	return h.participantID, ""
+}
+
+// stillAuthenticated re-checks a long-lived stream's credentials, so revoked or expired tokens end it.
+func (h *Handler) stillAuthenticated(r *http.Request, participant string) bool {
+	id, message := h.resolveParticipant(r)
+	return message == "" && id == participant
 }
 
 func decode(w http.ResponseWriter, r *http.Request, dst any) bool {

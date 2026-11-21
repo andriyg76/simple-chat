@@ -1,6 +1,7 @@
 package io.github.andriyg76.server;
 
 import io.github.andriyg76.core.ChatCore;
+import io.github.andriyg76.core.ChatException;
 import io.github.andriyg76.core.InboxDelivery;
 import io.github.andriyg76.protocol.EventKind;
 import io.github.andriyg76.protocol.InboxEvent;
@@ -25,7 +26,7 @@ public final class ChatInboxSseSupport {
             presence.connect(profileId);
         }
         try {
-            streamLoop(service, profileId, inboxCursor, out);
+            streamLoop(service, bearerToken, profileId, inboxCursor, out);
         } finally {
             if (presence != null) {
                 presence.disconnect(profileId);
@@ -33,14 +34,15 @@ public final class ChatInboxSseSupport {
         }
     }
 
-    private static void streamLoop(ChatV1Service service, String profileId, long inboxCursor, OutputStream out)
+    private static void streamLoop(
+            ChatV1Service service, String bearerToken, String profileId, long inboxCursor, OutputStream out)
             throws IOException {
         ChatCore core = service.core();
 
         InboxDelivery.InboxNextResult pending = core.inboxNext(profileId, inboxCursor, 1, 0L);
         boolean found = !pending.events().isEmpty();
         InboxEvent event = found ? pending.events().getFirst() : null;
-        long position = inboxCursor;
+        long position = found ? inboxCursor : pending.inboxCursor();
 
         while (!Thread.currentThread().isInterrupted()) {
             if (!found) {
@@ -49,6 +51,11 @@ public final class ChatInboxSseSupport {
                     return;
                 }
                 if (waited.events().isEmpty()) {
+                    position = waited.inboxCursor();
+                    // A revoked or expired token ends the stream at the next heartbeat.
+                    if (!sameParticipant(service, bearerToken, profileId)) {
+                        return;
+                    }
                     writeRaw(out, ": heartbeat\n\n");
                     continue;
                 }
@@ -65,11 +72,22 @@ public final class ChatInboxSseSupport {
                 found = false;
                 continue;
             }
+            if (!sameParticipant(service, bearerToken, profileId)) {
+                return;
+            }
             writeRaw(out, "id: " + event.inboxCursor() + "\n");
             writeRaw(out, "event: " + event.kind() + "\n");
             writeRaw(out, "data: " + event.toJson() + "\n\n");
             position = event.inboxCursor();
             found = false;
+        }
+    }
+
+    private static boolean sameParticipant(ChatV1Service service, String bearerToken, String profileId) {
+        try {
+            return profileId.equals(service.requireParticipant(bearerToken).id());
+        } catch (ChatException e) {
+            return false;
         }
     }
 

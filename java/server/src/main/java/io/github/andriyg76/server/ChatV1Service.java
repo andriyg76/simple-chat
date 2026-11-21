@@ -200,6 +200,7 @@ public class ChatV1Service {
             throw new ChatException("members_not_supported", 501, "members not supported");
         }
         members.removeMember(p.id(), conversationCode, profileId);
+        core.memberRemoved(conversationCode, profileId);
         core.emitInboxToMembers(
                 p.id(), conversationCode, "member_removed", "{\"profileId\":\"" + profileId + "\"}");
     }

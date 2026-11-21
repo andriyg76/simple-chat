@@ -53,6 +53,8 @@ func (c *Core) RemoveMember(ctx context.Context, actor, conversationCode, profil
 	if err := c.members.RemoveMember(ctx, actor, conversationCode, profileID); err != nil {
 		return err
 	}
+	c.redactInboxConversation(profileID, conversationCode)
+	c.wakeConversation(conversationCode)
 	c.EmitInboxToConversationMembers(ctx, actor, conversationCode, "member_removed", MemberPayloadJSON(profileID))
 	return nil
 }

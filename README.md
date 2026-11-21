@@ -12,7 +12,7 @@ Shared text-chat **protocol** and reference **client/server** implementations in
 | [java/protocol](java/protocol) | Wire POJOs (JDK only) |
 | [java/core](java/core) | `ChatCore` + `ConversationStore` |
 | [java/server](java/server) | Embeddable `ChatV1Service` |
-| [java/client](java/client) | Java reference client stub |
+| [java/client](java/client) | JDK-only terminal client (SSE + long poll) |
 | [SYNC.md](SYNC.md) | How to copy sources between products (no import / no vendor) |
 | [RELEASE.md](RELEASE.md) | `main` vs `release/X.Y` bugfix branches and Maven tags |
 | [java/MAVEN_CENTRAL.md](java/MAVEN_CENTRAL.md) | Publish `protocol` / `core` / `server` to Maven Central |

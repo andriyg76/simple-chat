@@ -8,7 +8,7 @@
 | [core](core) | `simple-chat-java-core` | `ChatCore`, `ConversationStore` |
 | [server](server) | `simple-chat-java-server` | `ChatV1Service`, `ChatSseSupport` (library) |
 | [test-server](test-server) | Spring Boot (local only) | Full `/chat/v1` + SSE + long poll; **excluded from `mvn deploy`** |
-| [client](client) | stub CLI | |
+| [client](client) | local only | JDK-only terminal client (`java.net.http`, SSE + long poll); **excluded from `mvn deploy`** |
 
 ## Embed in Askoldova
 
@@ -32,6 +32,20 @@ mvn -pl test-server spring-boot:run
 ```
 
 Binds to a **random free port** (`server.port=0`); the chosen URL is printed on startup. Default token/enroll code: `dev`.
+
+## Terminal client
+
+```bash
+cd java
+mvn -pl client -am package -DskipTests
+java -jar client/target/client-*-SNAPSHOT.jar --profile local --server http://localhost:8080 --enroll dev
+java -jar client/target/client-*-SNAPSHOT.jar   # later: reuses the last profile
+```
+
+Pick a room or press Enter for a new one, then type messages; replies arrive via the profile inbox
+(SSE, falling back to long poll). Commands: `/list`, `/use N`, `/new [TITLE]`, `/title NAME`, `/members`,
+`/add ID`, `/remove ID`, `/exit`. Profiles (server URL + bearer token) are saved owner-only in
+`~/.config/simple-chat/java-client.properties` (or `$XDG_CONFIG_HOME`). `--token TOKEN` saves an existing token instead of enrolling.
 
 ## Build libraries
 

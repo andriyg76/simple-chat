@@ -123,3 +123,30 @@ jobs:
           git add -A pom.xml protocol/pom.xml core/pom.xml server/pom.xml client/pom.xml e2e/pom.xml test-server/pom.xml
           git commit -m "Prepare ${XY}-SNAPSHOT development."
           git push origin "HEAD:${BRANCH}" "v${VERSION}"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.release_version }}
+          MODULES: ${{ inputs.module }}
+        run: |
+          TAG="v${VERSION}"
+          PREV=$(git describe --tags --abbrev=0 --match 'v*' "${TAG}^" 2>/dev/null || true)
+          RANGE="${PREV:+${PREV}..}${TAG}"
+          {
+            echo "## Maven Central"
+            echo
+            for m in ${MODULES//,/ }; do
+              echo "- \`io.github.andriyg76.simple-chat:${m}:${VERSION}\`"
+            done
+            echo
+            echo "## Changes"
+            echo
+            git log --no-merges --format='- %s (%h)' "$RANGE" \
+              | grep -vE '^- (Release [0-9]+\.[0-9]+\.[0-9]+\.|Prepare [0-9]+\.[0-9]+-SNAPSHOT development\.) ' || true
+            if [ -n "$PREV" ]; then
+              echo
+              echo "**Full changelog:** https://github.com/${GITHUB_REPOSITORY}/compare/${PREV}...${TAG}"
+            fi
+          } > "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag

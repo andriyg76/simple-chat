@@ -50,11 +50,16 @@ func (c *Core) RemoveMember(ctx context.Context, actor, conversationCode, profil
 	if _, err := c.Session(ctx, actor, conversationCode); err != nil {
 		return err
 	}
+	// Captured before the removal: a member who leaves can no longer list the conversation's members.
+	recipients, _ := c.deliveryRecipients(ctx, actor, conversationCode)
 	if err := c.members.RemoveMember(ctx, actor, conversationCode, profileID); err != nil {
 		return err
 	}
 	c.redactInboxConversation(profileID, conversationCode)
 	c.wakeConversation(conversationCode)
-	c.EmitInboxToConversationMembers(ctx, actor, conversationCode, "member_removed", MemberPayloadJSON(profileID))
+	template := InboxEvent{SessionID: conversationCode, Kind: "member_removed", Text: MemberPayloadJSON(profileID)}
+	for _, recipient := range recipients {
+		c.appendInbox(recipient, template)
+	}
 	return nil
 }

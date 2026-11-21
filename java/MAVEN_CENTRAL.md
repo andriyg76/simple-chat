@@ -10,7 +10,7 @@ Published artifacts (example **0.1.0**):
 
 Not published: `test-server`, `client`.
 
-Between releases the reactor version is **`X.Y-SNAPSHOT`** (see [RELEASE.md](../RELEASE.md)).
+Between releases the reactor version is **`X.Y.P-SNAPSHOT`** (see [RELEASE.md](../RELEASE.md)).
 
 ## One-time setup
 
@@ -37,7 +37,7 @@ Local `~/.m2/settings.xml` (optional manual deploy):
 
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) — **workflow_dispatch**:
 
-- **Release version** (default `0.1.0`) → `vX.Y.P` tag and release poms
+- **Release version** (empty = current `X.Y.P-SNAPSHOT` without the suffix) → `vX.Y.P` tag and release poms
 - **Branch** (default `main`)
 
 After deploy, the branch moves to its next snapshot (see [RELEASE.md](../RELEASE.md)).
@@ -48,7 +48,7 @@ From `java/`:
 
 ```bash
 bash scripts/set-reactor-version.sh 0.1.2   # release
-bash scripts/set-reactor-version.sh 0.1-SNAPSHOT
+bash scripts/set-reactor-version.sh 0.1.3-SNAPSHOT
 ```
 
 Manual deploy at a release version:

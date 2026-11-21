@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       release_version:
-        description: "Release version X.Y.P (Git tag vX.Y.P); main releases X.Y.0, release/X.Y releases X.Y.P"
-        required: true
-        default: "0.1.0"
+        description: "Release version X.Y.P (Git tag vX.Y.P); empty = current X.Y.P-SNAPSHOT without -SNAPSHOT"
+        required: false
+        default: ""
       branch:
         description: "Branch (main or release/X.Y)"
         required: true
@@ -35,29 +35,34 @@ jobs:
           ref: ${{ inputs.branch }}
           fetch-depth: 0
 
-      - name: Validate branch and version
-        env:
-          BR: ${{ inputs.branch }}
-          V: ${{ inputs.release_version }}
-        run: |
-          if ! [[ "$V" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-            echo "release_version must be X.Y.P (no -SNAPSHOT)"
-            exit 1
-          fi
-          XY="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
-          P="${BASH_REMATCH[3]}"
-          if [ "$BR" = "main" ]; then
-            [ "$P" = "0" ] || { echo "main releases X.Y.0; patch releases go from release/${XY}"; exit 1; }
-          elif [ "$BR" != "release/${XY}" ]; then
-            echo "Branch must be main or release/${XY} for ${V}"
-            exit 1
-          fi
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
           cache: maven
+
+      - name: Resolve and validate release version
+        id: version
+        env:
+          BR: ${{ inputs.branch }}
+          INPUT: ${{ inputs.release_version }}
+        run: |
+          V="$INPUT"
+          if [ -z "$V" ]; then
+            CURRENT=$(mvn -q -B -ntp help:evaluate -Dexpression=project.version -DforceStdout)
+            V="${CURRENT%-SNAPSHOT}"
+          fi
+          if ! [[ "$V" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "release version must be X.Y.P (got '${V}')"
+            exit 1
+          fi
+          XY="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+          if [ "$BR" != "main" ] && [ "$BR" != "release/${XY}" ]; then
+            echo "Branch must be main or release/${XY} for ${V}"
+            exit 1
+          fi
+          echo "Releasing ${V} from ${BR}"
+          echo "version=${V}" >> "$GITHUB_OUTPUT"
 
       - name: Import GPG key
         uses: crazy-max/ghaction-import-gpg@v6
@@ -86,7 +91,7 @@ jobs:
       - name: Reserve release commit and tag
         id: reserve
         env:
-          VERSION: ${{ inputs.release_version }}
+          VERSION: ${{ steps.version.outputs.version }}
           BRANCH: ${{ inputs.branch }}
         run: |
           TAG="v${VERSION}"
@@ -107,7 +112,7 @@ jobs:
 
       - name: Deploy to Maven Central
         env:
-          VERSION: ${{ inputs.release_version }}
+          VERSION: ${{ steps.version.outputs.version }}
           MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
           MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
@@ -121,7 +126,7 @@ jobs:
 
       - name: Set next development version
         env:
-          VERSION: ${{ inputs.release_version }}
+          VERSION: ${{ steps.version.outputs.version }}
           BRANCH: ${{ inputs.branch }}
         run: |
           git fetch -q origin "$BRANCH"
@@ -131,9 +136,7 @@ jobs:
             echo "::notice::${BRANCH} is at ${CURRENT}; development version already set"
             exit 0
           fi
-          X="${VERSION%%.*}"; REST="${VERSION#*.}"; Y="${REST%%.*}"
-          # main moves to the next minor so it never shares a snapshot with release/X.Y.
-          if [ "$BRANCH" = "main" ]; then NEXT="${X}.$((Y + 1))-SNAPSHOT"; else NEXT="${X}.${Y}-SNAPSHOT"; fi
+          NEXT="${VERSION%.*}.$(( ${VERSION##*.} + 1 ))-SNAPSHOT"
           bash scripts/set-reactor-version.sh "$NEXT"
           git add -A pom.xml protocol/pom.xml core/pom.xml server/pom.xml client/pom.xml e2e/pom.xml test-server/pom.xml
           git commit -m "Prepare ${NEXT} development."
@@ -142,7 +145,7 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ inputs.release_version }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           TAG="v${VERSION}"
           if gh release view "$TAG" >/dev/null 2>&1; then
@@ -161,7 +164,7 @@ jobs:
             echo "## Changes"
             echo
             git log --no-merges --format='- %s (%h)' "$RANGE" \
-              | grep -vE '^- (Release [0-9]+\.[0-9]+\.[0-9]+\.|Prepare [0-9]+\.[0-9]+-SNAPSHOT development\.) ' || true
+              | grep -vE '^- (Release [0-9]+\.[0-9]+\.[0-9]+\.|Prepare [0-9.]+-SNAPSHOT development\.) ' || true
             if [ -n "$PREV" ]; then
               echo
               echo "**Full changelog:** https://github.com/${GITHUB_REPOSITORY}/compare/${PREV}...${TAG}"

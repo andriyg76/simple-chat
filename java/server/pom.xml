@@ -13,6 +13,21 @@
     <artifactId>server</artifactId>
     <name>server</name>
     <description>Embeddable /chat/v1 service — JDK only</description>
+    <url>https://github.com/andriyg76/simple-chat</url>
+
+    <licenses>
+        <license>
+            <name>BSD-2-Clause</name>
+            <url>https://opensource.org/license/bsd-2-clause</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <scm>
+        <connection>scm:git:https://github.com/andriyg76/simple-chat.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com/andriyg76/simple-chat.git</developerConnection>
+        <url>https://github.com/andriyg76/simple-chat</url>
+    </scm>
 
     <dependencies>
         <dependency>

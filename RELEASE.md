@@ -28,6 +28,7 @@ The workflow:
 3. **`mvn deploy -Prelease`** for the chosen module(s)
 4. Sets poms back to **`X.Y-SNAPSHOT`** (major.minor from the release)
 5. Commits and pushes the branch **and** the tag
+6. Creates a GitHub release for the tag with the commits since the previous `v*` tag
 
 Secrets: see [java/MAVEN_CENTRAL.md](java/MAVEN_CENTRAL.md).
 

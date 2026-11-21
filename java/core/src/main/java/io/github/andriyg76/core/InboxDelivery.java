@@ -2,6 +2,7 @@ package io.github.andriyg76.core;
 
 import io.github.andriyg76.protocol.ChatEvent;
 import io.github.andriyg76.protocol.InboxEvent;
+import io.github.andriyg76.protocol.MessageSender;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -172,7 +173,8 @@ public final class InboxDelivery {
                     template.sessionId(),
                     template.requestId(),
                     template.messageId() != null ? template.messageId() : UUID.randomUUID().toString(),
-                    template.sender(),
+                    // Metadata events have no author; the protocol requires a sender, so they come from the server.
+                    template.sender() != null ? template.sender() : MessageSender.SERVER,
                     template.kind(),
                     template.text(),
                     template.createdAt() != null ? template.createdAt() : Instant.now());

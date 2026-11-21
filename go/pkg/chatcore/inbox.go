@@ -89,6 +89,10 @@ func (c *Core) appendInbox(profileID string, template InboxEvent) InboxEvent {
 	if template.MessageID == "" {
 		template.MessageID = uuid.NewString()
 	}
+	// Metadata events have no author; the protocol requires a sender, so they come from the server.
+	if template.Sender == "" {
+		template.Sender = "server"
+	}
 	if template.CreatedAt.IsZero() {
 		template.CreatedAt = time.Now().UTC()
 	}

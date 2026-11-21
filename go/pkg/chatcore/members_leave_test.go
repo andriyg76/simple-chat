@@ -23,7 +23,7 @@ func TestMemberLeavingNotifiesRemainingMembers(t *testing.T) {
 		t.Fatalf("leaving own conversation: %v", err)
 	}
 	events, _, err := c.InboxNext(ctx, "owner", 0, 50, 0)
-	if err != nil || len(events) == 0 || events[len(events)-1].Kind != "member_removed" {
+	if err != nil || len(events) == 0 || events[len(events)-1].Kind != "member_removed" || events[len(events)-1].Sender != "server" {
 		t.Fatalf("owner events = %+v err = %v", events, err)
 	}
 }

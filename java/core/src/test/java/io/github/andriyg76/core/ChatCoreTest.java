@@ -69,5 +69,6 @@ class ChatCoreTest {
 
         var feed = core.inboxNext("owner", 0L, 50, 0L);
         assertEquals("member_removed", feed.events().getLast().kind());
+        assertEquals(MessageSender.SERVER, feed.events().getLast().sender());
     }
 }

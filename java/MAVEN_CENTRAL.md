@@ -38,10 +38,9 @@ Local `~/.m2/settings.xml` (optional manual deploy):
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) — **workflow_dispatch**:
 
 - **Release version** (default `0.1.0`) → `vX.Y.P` tag and release poms
-- **Module** (default all three libraries) → Maven `-pl`
 - **Branch** (default `main`)
 
-After deploy, poms return to **`X.Y-SNAPSHOT`** and are pushed with the tag.
+After deploy, the branch moves to its next snapshot (see [RELEASE.md](../RELEASE.md)).
 
 ## Local version bump (without CI)
 

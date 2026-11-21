@@ -17,7 +17,8 @@ func (h *Handler) profileFor(participantID string, r *http.Request) Profile {
 	if h.tokens != nil {
 		token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 		if token != "" {
-			if profile, ok := h.tokens.Resolve(token); ok {
+			// A context identity from an embedding host wins over a forwarded bearer token.
+			if profile, ok := h.tokens.Resolve(token); ok && profile.Code == participantID {
 				return profile
 			}
 		}

@@ -23,6 +23,24 @@ jobs:
           go-version-file: go/pkg/go.mod
       - run: go test ./...
 
+  go-e2e:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go/e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/e2e/go.mod
+      # The Go client / Java test-server scenario builds and runs the Java test server.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - run: go test ./...
+
   java:
     runs-on: ubuntu-latest
     defaults:
